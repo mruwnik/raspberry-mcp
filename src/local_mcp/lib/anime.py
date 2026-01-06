@@ -1,7 +1,10 @@
 """Anime download management - core implementation."""
 
+import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import TypedDict
 from urllib.request import urlretrieve
 
 import httpx
@@ -22,6 +25,36 @@ ANIME_NAME_REGEX = re.compile(
 )
 
 
+# --- Types ---
+
+
+class Episode(TypedDict):
+    """Anime episode with parsed info and status."""
+
+    group: str
+    title: str
+    episode: float
+    quality: str
+    path: str
+    stalled: bool
+    watched: bool
+
+
+class HistoryEntry(TypedDict, total=False):
+    """History event entry (JSONL format)."""
+
+    ts: str
+    action: str  # "watched" or "stalled"
+    path: str
+    series: str
+    episode: float
+    group: str
+    quality: str
+
+
+# --- Path management ---
+
+
 def ensure_paths():
     """Create required directories if they don't exist."""
     HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -30,62 +63,113 @@ def ensure_paths():
     WATCH_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def parse_episode(filename: str) -> dict | None:
-    """Parse episode info from filename."""
+# --- Parsing ---
+
+
+def parse_episode(
+    filename: str, path: str = "", stalled: bool = False, watched: bool = False
+) -> Episode | None:
+    """Parse episode info from filename into an Episode."""
     match = ANIME_NAME_REGEX.match(filename)
     if not match:
         return None
 
-    info = match.groupdict()
-    info["episode"] = float(info["episode"]) if info["episode"] else -1
-    return info
+    groups = match.groupdict()
+    return Episode(
+        group=groups["group"],
+        title=groups["title"],
+        episode=float(groups["episode"]) if groups["episode"] else -1,
+        quality=groups["quality"],
+        path=path,
+        stalled=stalled,
+        watched=watched,
+    )
 
 
-def seen_paths() -> set[Path]:
-    """Get set of watched episode paths."""
+# --- History ---
+
+
+def read_history() -> list[HistoryEntry]:
+    """Read history entries from JSONL file."""
     if not HISTORY_FILE.exists():
-        return set()
-    return {Path(line) for line in HISTORY_FILE.read_text().splitlines() if line}
+        return []
+
+    entries: list[HistoryEntry] = []
+    for line in HISTORY_FILE.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            # Legacy format: plain path
+            entries.append(HistoryEntry(action="watched", path=line))
+    return entries
 
 
-def disk_episodes() -> list[Path]:
-    """Get all episode files on disk (main dir + stalled)."""
-    main = set(BASE_PATH.glob(VIDEO_GLOB))
-    stalled = set(STALLED_DIR.glob(VIDEO_GLOB))
-    return sorted(main | stalled)
+def write_history_entry(entry: HistoryEntry) -> None:
+    """Append a single entry to history file."""
+    with open(HISTORY_FILE, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
 
-def build_library() -> dict[str, dict]:
-    """Build library state from disk + history."""
-    seen = seen_paths()
-    episodes = disk_episodes()
+def watched_filenames() -> set[str]:
+    """Get set of watched episode filenames."""
+    return {
+        Path(e["path"]).name for e in read_history() if e.get("action") == "watched"
+    }
 
-    # Group by series
+
+# --- Entry producers ---
+
+
+def disk_entries() -> list[Episode]:
+    """Get all episodes on disk as parsed entries."""
+    main_files = set(BASE_PATH.glob(VIDEO_GLOB))
+    stalled_files = set(STALLED_DIR.glob(VIDEO_GLOB))
+    watched = watched_filenames()
+
+    entries = []
+    for path in sorted(main_files | stalled_files):
+        if ep := parse_episode(
+            path.name,
+            path=str(path),
+            stalled=STALLED_DIR in path.parents,
+            watched=path.name in watched,
+        ):
+            entries.append(ep)
+    return entries
+
+
+# --- Library ---
+
+
+def build_library(entries: list[Episode] | None = None) -> dict[str, dict]:
+    """Build library state from entries, grouped by series."""
+    if entries is None:
+        entries = disk_entries()
+
     series_map: dict[str, dict] = {}
 
-    for path in episodes:
-        info = parse_episode(path.name)
-        if not info:
-            continue
-
-        title = info["title"]
+    for ep in entries:
+        title = ep["title"]
         if title not in series_map:
             series_map[title] = {
                 "title": title,
-                "group": info["group"],
-                "quality": info["quality"],
+                "group": ep["group"],
+                "quality": ep["quality"],
                 "episodes": [],
             }
 
-        is_stalled = STALLED_DIR in path.parents
-        series_map[title]["episodes"].append({
-            "episode": info["episode"],
-            "path": str(path),
-            "watched": path in seen or any(p.name == path.name for p in seen),
-            "stalled": is_stalled,
-        })
+        series_map[title]["episodes"].append(
+            {
+                "episode": ep["episode"],
+                "path": ep["path"],
+                "watched": ep["watched"],
+                "stalled": ep["stalled"],
+            }
+        )
 
-    # Sort episodes within each series
+    # Sort episodes and compute aggregates
     for series in series_map.values():
         series["episodes"].sort(key=lambda e: e["episode"])
         series["latest_episode"] = max(e["episode"] for e in series["episodes"])
@@ -179,13 +263,27 @@ async def get_library(series: str | None = None) -> dict:
     return {"series": sorted(library.values(), key=lambda s: s["title"])}
 
 
+def _build_history_entry(action: str, path: Path) -> HistoryEntry:
+    """Build a history entry with parsed metadata."""
+    entry = HistoryEntry(
+        ts=datetime.now(timezone.utc).isoformat(),
+        action=action,
+        path=str(path),
+    )
+    if parsed := parse_episode(path.name):
+        entry["series"] = parsed["title"]
+        entry["episode"] = parsed["episode"]
+        entry["group"] = parsed["group"]
+        entry["quality"] = parsed["quality"]
+    return entry
+
+
 async def mark_episode(path: str, status: str) -> dict:
     """Mark an episode as watched or stalled."""
     ensure_paths()
     episode_path = Path(path)
 
     if not episode_path.exists():
-        # Check if it's just a filename
         possible = BASE_PATH / episode_path.name
         if possible.exists():
             episode_path = possible
@@ -193,15 +291,13 @@ async def mark_episode(path: str, status: str) -> dict:
             return {"error": f"Episode not found: {path}"}
 
     if status == "watched":
-        # Add to history file
-        with open(HISTORY_FILE, "a") as f:
-            f.write(f"{episode_path}\n")
+        write_history_entry(_build_history_entry("watched", episode_path))
         return {"status": "marked_watched", "path": str(episode_path)}
 
-    elif status == "stalled":
-        # Move to stalled directory
+    if status == "stalled":
         dest = STALLED_DIR / episode_path.name
         episode_path.rename(dest)
+        write_history_entry(_build_history_entry("stalled", dest))
         return {"status": "marked_stalled", "path": str(dest)}
 
     return {"error": f"Unknown status: {status}"}
@@ -244,10 +340,12 @@ async def check_episodes(series: str | None = None, download: bool = False) -> d
                     downloaded.append({**entry, "downloaded_to": dest})
 
         except Exception as e:
-            available.append({
-                "series": s["title"],
-                "error": str(e),
-            })
+            available.append(
+                {
+                    "series": s["title"],
+                    "error": str(e),
+                }
+            )
 
     return {
         "available": available,
@@ -270,4 +368,5 @@ async def check_and_download():
 def main():
     """Sync CLI entry point for cron."""
     import asyncio
+
     asyncio.run(check_and_download())

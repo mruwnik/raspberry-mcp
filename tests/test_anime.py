@@ -7,6 +7,8 @@ import pytest
 
 from local_mcp.lib.anime import (
     ANIME_NAME_REGEX,
+    Episode,
+    HistoryEntry,
     parse_episode,
     torrent_url,
 )
@@ -199,12 +201,13 @@ def test_build_library_stalled_episodes(mock_anime_settings):
     assert library["Dropped Show"]["episodes"][0]["stalled"] is True
 
 
-def test_build_library_watched_episodes(mock_anime_settings):
+def test_build_library_watched_episodes_legacy_format(mock_anime_settings):
+    """Test that legacy plain-path format still works."""
     temp_dir = mock_anime_settings
     episode = temp_dir / "[SubsPlease] Watched Show - 01 [1080p].mkv"
     episode.touch()
 
-    # Mark as watched in history
+    # Mark as watched in history (legacy plain path format)
     history = temp_dir / ".anime_history"
     history.write_text(f"{episode}\n")
 
@@ -214,3 +217,174 @@ def test_build_library_watched_episodes(mock_anime_settings):
     assert "Watched Show" in library
     assert library["Watched Show"]["episodes"][0]["watched"] is True
     assert library["Watched Show"]["latest_watched"] == 1.0
+
+
+def test_build_library_watched_episodes_jsonl_format(mock_anime_settings):
+    """Test that JSONL format works."""
+    import json
+    temp_dir = mock_anime_settings
+    episode = temp_dir / "[SubsPlease] Watched Show - 01 [1080p].mkv"
+    episode.touch()
+
+    # Mark as watched in history (JSONL format)
+    history = temp_dir / ".anime_history"
+    entry = {"action": "watched", "path": str(episode), "series": "Watched Show", "episode": 1.0}
+    history.write_text(json.dumps(entry) + "\n")
+
+    from local_mcp.lib.anime import build_library
+    library = build_library()
+
+    assert "Watched Show" in library
+    assert library["Watched Show"]["episodes"][0]["watched"] is True
+    assert library["Watched Show"]["latest_watched"] == 1.0
+
+
+def test_read_history_mixed_formats(mock_anime_settings):
+    """Test reading history with mixed legacy and JSONL entries."""
+    import json
+    temp_dir = mock_anime_settings
+    history = temp_dir / ".anime_history"
+
+    # Mix of legacy and JSONL
+    lines = [
+        "/old/path/[SubsPlease] Old - 01 [1080p].mkv",
+        json.dumps({"action": "watched", "path": "/new/path/file.mkv", "series": "New"}),
+    ]
+    history.write_text("\n".join(lines) + "\n")
+
+    from local_mcp.lib.anime import read_history
+    entries = read_history()
+
+    assert len(entries) == 2
+    assert entries[0]["path"] == "/old/path/[SubsPlease] Old - 01 [1080p].mkv"
+    assert entries[0]["action"] == "watched"
+    assert entries[1]["series"] == "New"
+
+
+def test_write_history_entry_creates_jsonl(mock_anime_settings):
+    """Test that write_history_entry creates valid JSONL."""
+    import json
+    temp_dir = mock_anime_settings
+    history = temp_dir / ".anime_history"
+
+    from local_mcp.lib.anime import write_history_entry
+    write_history_entry({"action": "watched", "path": "/test/path.mkv", "series": "Test"})
+
+    content = history.read_text().strip()
+    entry = json.loads(content)
+    assert entry["action"] == "watched"
+    assert entry["series"] == "Test"
+
+
+# Type tests
+
+
+def test_parse_episode_returns_episode():
+    """parse_episode returns Episode with all fields."""
+    result = parse_episode("[SubsPlease] Show - 01 [1080p].mkv")
+    assert result is not None
+    assert set(result.keys()) == {"group", "title", "episode", "quality", "path", "stalled", "watched"}
+    assert result["path"] == ""
+    assert result["stalled"] is False
+    assert result["watched"] is False
+
+
+def test_parse_episode_with_status():
+    """parse_episode accepts path and status parameters."""
+    result = parse_episode("[SubsPlease] Show - 01 [1080p].mkv", path="/some/path.mkv", stalled=True, watched=True)
+    assert result is not None
+    assert result["path"] == "/some/path.mkv"
+    assert result["stalled"] is True
+    assert result["watched"] is True
+
+
+# disk_entries tests
+
+
+def test_disk_entries_empty(mock_anime_settings):
+    """disk_entries returns empty list for empty directory."""
+    from local_mcp.lib.anime import disk_entries
+    entries = disk_entries()
+    assert entries == []
+
+
+def test_disk_entries_returns_episodes(mock_anime_settings):
+    """disk_entries returns list of Episode."""
+    temp_dir = mock_anime_settings
+    (temp_dir / "[SubsPlease] Frieren - 01 [1080p].mkv").touch()
+
+    from local_mcp.lib.anime import disk_entries
+    entries = disk_entries()
+
+    assert len(entries) == 1
+    ep = entries[0]
+    assert set(ep.keys()) == {"group", "title", "episode", "quality", "path", "stalled", "watched"}
+    assert ep["group"] == "SubsPlease"
+    assert ep["title"] == "Frieren"
+    assert ep["episode"] == 1.0
+    assert ep["quality"] == "1080p"
+    assert ep["stalled"] is False
+    assert ep["watched"] is False
+
+
+def test_disk_entries_includes_stalled(mock_anime_settings):
+    """disk_entries includes episodes from stalled directory."""
+    temp_dir = mock_anime_settings
+    stalled = temp_dir / "stalled"
+    (stalled / "[SubsPlease] Dropped - 01 [1080p].mkv").touch()
+
+    from local_mcp.lib.anime import disk_entries
+    entries = disk_entries()
+
+    assert len(entries) == 1
+    assert entries[0]["stalled"] is True
+
+
+def test_disk_entries_marks_watched(mock_anime_settings):
+    """disk_entries marks watched episodes correctly."""
+    import json
+    temp_dir = mock_anime_settings
+    episode = temp_dir / "[SubsPlease] Watched - 01 [1080p].mkv"
+    episode.touch()
+
+    history = temp_dir / ".anime_history"
+    history.write_text(json.dumps({"action": "watched", "path": str(episode)}) + "\n")
+
+    from local_mcp.lib.anime import disk_entries
+    entries = disk_entries()
+
+    assert len(entries) == 1
+    assert entries[0]["watched"] is True
+
+
+def test_build_library_accepts_entries(mock_anime_settings):
+    """build_library can consume pre-built entries."""
+    from local_mcp.lib.anime import build_library
+
+    entries: list[Episode] = [
+        Episode(
+            group="SubsPlease",
+            title="Test Show",
+            episode=1.0,
+            quality="1080p",
+            path="/fake/path.mkv",
+            stalled=False,
+            watched=True,
+        ),
+        Episode(
+            group="SubsPlease",
+            title="Test Show",
+            episode=2.0,
+            quality="1080p",
+            path="/fake/path2.mkv",
+            stalled=False,
+            watched=False,
+        ),
+    ]
+
+    library = build_library(entries)
+
+    assert "Test Show" in library
+    assert library["Test Show"]["latest_episode"] == 2.0
+    assert library["Test Show"]["latest_watched"] == 1.0
+    assert len(library["Test Show"]["episodes"]) == 2
