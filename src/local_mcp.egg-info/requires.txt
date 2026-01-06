@@ -1,4 +1,6 @@
-mcp-oauth-server@ git+https://github.com/mruwnik/base-mcp-oauth.git
+fastmcp>=2.14.2
 python-dotenv
 httpx
 beautifulsoup4
+passlib[bcrypt]
+bcrypt<5

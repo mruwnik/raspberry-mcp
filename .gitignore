@@ -1,3 +1,4 @@
+.htpasswd
 .env
 users.txt
 .venv

@@ -4,7 +4,9 @@ Version: 0.1.0
 Summary: Local MCP server with music/MPD control tools
 Author: Dan
 Requires-Python: >=3.10
-Requires-Dist: mcp-oauth-server@ git+https://github.com/mruwnik/base-mcp-oauth.git
+Requires-Dist: fastmcp>=2.14.2
 Requires-Dist: python-dotenv
 Requires-Dist: httpx
 Requires-Dist: beautifulsoup4
+Requires-Dist: passlib[bcrypt]
+Requires-Dist: bcrypt<5

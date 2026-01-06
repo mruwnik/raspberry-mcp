@@ -1,2 +1,3 @@
 [console_scripts]
+anime-check = local_mcp.lib.anime:main
 local-mcp = local_mcp.server:main
