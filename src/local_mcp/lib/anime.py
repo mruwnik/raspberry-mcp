@@ -91,10 +91,13 @@ def parse_episode(
 
 def read_history() -> list[HistoryEntry]:
     """Read history entries from JSONL file."""
+    print(f"Reading history from {HISTORY_FILE}")
     if not HISTORY_FILE.exists():
+        print(f"History file does not exist: {HISTORY_FILE}")
         return []
 
     entries: list[HistoryEntry] = []
+    print(f"Processing {len(entries)} items")
     for line in HISTORY_FILE.read_text().splitlines():
         if not line.strip():
             continue
@@ -357,6 +360,7 @@ async def check_episodes(series: str | None = None, download: bool = False) -> d
 async def check_and_download():
     """CLI entry point: check all series and download new episodes."""
     result = await check_episodes(download=True)
+    print(f"Checked {result['checked_series']} series")
     if result["downloaded"]:
         for ep in result["downloaded"]:
             print(f"Downloaded: [{ep['group']}] {ep['series']} - {ep['episode']}")
