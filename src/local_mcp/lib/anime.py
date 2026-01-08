@@ -11,11 +11,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
-from urllib.request import urlretrieve
 
-import httpx
-from bs4 import BeautifulSoup
-
+from local_mcp.lib import torrent
 from local_mcp.settings import (
     ANIME_BASE_PATH as BASE_PATH,
     ANIME_HISTORY_FILE as HISTORY_FILE,
@@ -27,16 +24,9 @@ from local_mcp.settings import (
 
 logger = logging.getLogger(__name__)
 
-TORRENTS_BASE_URL = "https://nyaa.si"
-
 # Regex for local filenames (requires .mkv extension)
 ANIME_NAME_REGEX = re.compile(
     r"\[(?P<group>.*?)\]\s*(?P<title>.*?)[\s-]*(?P<episode>\d*?)\s*(END)?\s*(\[v\d+\])?(\[|\()(?P<quality>.*?)(\]|\)).*?\.mkv"
-)
-
-# Regex for torrent titles (no .mkv, handles language tags like (JA))
-TORRENT_NAME_REGEX = re.compile(
-    r"\[(?P<group>.*?)\]\s*(?P<title>.*?)\s*-\s*(?P<episode>\d+)\s*(\((?:JA|EN|Multi)\))?\s*(END)?\s*(\[v\d+\])?\s*[\[\(](?P<quality>\d+p[^\]]*?)[\]\)]"
 )
 
 
@@ -299,82 +289,6 @@ def build_library() -> dict[str, Series]:
     return series_map
 
 
-def parse_torrent_title(title: str) -> Episode | None:
-    """Parse episode info from a torrent title (nyaa.si format)."""
-    match = TORRENT_NAME_REGEX.match(title)
-    if not match:
-        return None
-
-    groups = match.groupdict()
-    return Episode(
-        group=groups["group"],
-        title=groups["title"].strip(),
-        episode=float(groups["episode"]) if groups["episode"] else -1,
-        quality=groups["quality"],
-    )
-
-
-def parse_torrent_row(row) -> dict | None:
-    """Parse a single nyaa.si result row."""
-    cells = row.find_all("td")
-    if len(cells) < 8:
-        return None
-
-    cat, name, download, size, date, seeds, leeches, status = cells
-    title_link = name.find_all("a")[-1] if name.find_all("a") else None
-    if not title_link:
-        return None
-
-    info = parse_torrent_title(title_link.get("title", ""))
-    if not info:
-        return None
-
-    torrent_link = download.find("i", attrs={"class": "fa-download"})
-    magnet_link = download.find("i", attrs={"class": "fa-magnet"})
-
-    if torrent_link and torrent_link.parent:
-        info["torrent"] = TORRENTS_BASE_URL + torrent_link.parent.get("href", "")
-    if magnet_link and magnet_link.parent:
-        info["magnet"] = magnet_link.parent.get("href", "")
-
-    return info
-
-
-async def fetch_group_releases(group: str, pages: int = 3) -> list[dict]:
-    """Fetch recent releases from a trusted group via search.
-
-    Args:
-        group: Group name to search for on nyaa.si
-        pages: Number of pages to fetch (each ~75 results)
-
-    Returns:
-        List of parsed episode info dicts
-    """
-    results = []
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; anime-checker/1.0)",
-        "Accept-Encoding": "gzip, deflate",
-    }
-
-    async with httpx.AsyncClient(headers=headers) as client:
-        for page in range(1, pages + 1):
-            # f=2 = trusted only, c=1_2 = Anime English-translated
-            url = f"{TORRENTS_BASE_URL}/?f=2&c=1_2&q={group}"
-            if page > 1:
-                url += f"&p={page}"
-
-            response = await client.get(url, timeout=30.0)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, "html.parser")
-            for row in soup.find_all("tr", attrs={"class": "success"}):
-                if info := parse_torrent_row(row):
-                    results.append(info)
-
-    return results
-
-
 async def check_trusted_releases(download: bool = False) -> dict:
     """Check trusted groups for new episodes of tracked series.
 
@@ -395,7 +309,7 @@ async def check_trusted_releases(download: bool = False) -> dict:
     for group in TRUSTED_GROUPS:
         print(f"Fetching releases from {group}...")
         try:
-            releases = await fetch_group_releases(group)
+            releases = await torrent.fetch_group_releases(group)
             for ep in releases:
                 series = ep["title"]
                 episode = ep["episode"]
@@ -434,19 +348,21 @@ async def check_trusted_releases(download: bool = False) -> dict:
             available.append(entry)
 
             if download and ep.get("torrent"):
-                dest = download_torrent(ep)
-                write_history_entry(
-                    HistoryEntry(
-                        ts=datetime.now(timezone.utc).isoformat(),
-                        status="unwatched",
-                        path=dest,
-                        series=series,
-                        episode=episode_num,
-                        group=ep["group"],
-                        quality=ep["quality"],
+                dest = torrent.download(ep["torrent"])
+                video_path = torrent.video_path(dest)
+                if video_path:
+                    write_history_entry(
+                        HistoryEntry(
+                            ts=datetime.now(timezone.utc).isoformat(),
+                            status="unwatched",
+                            path=video_path,
+                            series=series,
+                            episode=episode_num,
+                            group=ep["group"],
+                            quality=ep["quality"],
+                        )
                     )
-                )
-                downloaded.append({**entry, "downloaded_to": dest})
+                downloaded.append({**entry, "downloaded_to": str(dest)})
 
     return {
         "available": available,
@@ -454,16 +370,6 @@ async def check_trusted_releases(download: bool = False) -> dict:
         "checked_groups": len(TRUSTED_GROUPS),
         "matched_series": len(all_releases),
     }
-
-
-def download_torrent(episode: dict) -> str:
-    """Download torrent file to watch directory."""
-    ensure_paths()
-    torrent_url = episode["torrent"]
-    filename = torrent_url.split("/")[-1]
-    dest = WATCH_DIR / filename
-    urlretrieve(torrent_url, dest)
-    return str(dest)
 
 
 def get_library(

@@ -1,10 +1,11 @@
 """Anime download management tools."""
 
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastmcp import FastMCP
 
-from local_mcp.lib import anime
+from local_mcp.lib import anime, torrent
 
 mcp = FastMCP(name="anime")
 
@@ -48,18 +49,60 @@ def anime_mark(path: str, status: Literal["watched", "stalled"]) -> dict:
 
 
 @mcp.tool()
-async def anime_check(download: bool = False) -> dict:
+def anime_add(
+    torrent_src: str,
+    series: str,
+    episode: float,
+    group: str | None = None,
+    quality: str | None = None,
+) -> dict:
     """
-    Check trusted groups for new episodes of tracked series.
-
-    Fetches recent releases from SubsPlease and Erai-raws, matches against
-    library, and optionally downloads new episodes.
+    Add a torrent file to the watch directory for download.
 
     Args:
-        download: If True, download any new episodes found
+        torrent_src: Path to a local .torrent file or URL to download
+        series: Series name (should match library naming for tracking)
+        episode: Episode number
+        group: Release group (optional)
+        quality: Quality string like "1080p" (optional)
 
     Returns:
-        - available: list of {series, episode, torrent_url}
-        - downloaded: list of downloaded episodes (if download=True)
+        - status: "added" on success
+        - torrent_path: where the torrent was saved
+        - video_path: expected path of the downloaded video
+        - series, episode, group, quality: the metadata provided
     """
-    return await anime.check_trusted_releases(download)
+    fallback = f"{series.replace(' ', '_')}_{int(episode)}.torrent"
+    try:
+        dest = torrent.download(torrent_src, fallback_name=fallback)
+    except FileNotFoundError as e:
+        return {"error": str(e)}
+
+    video_path = torrent.video_path(dest)
+    if not video_path:
+        return {"error": f"Could not extract video filename from torrent: {dest}"}
+
+    grp = group or "unknown"
+    qual = quality or "unknown"
+
+    anime.write_history_entry(
+        anime.HistoryEntry(
+            ts=datetime.now(timezone.utc).isoformat(),
+            status="unwatched",
+            path=video_path,
+            series=series,
+            episode=episode,
+            group=grp,
+            quality=qual,
+        )
+    )
+
+    return {
+        "status": "added",
+        "torrent_path": str(dest),
+        "video_path": video_path,
+        "series": series,
+        "episode": episode,
+        "group": group,
+        "quality": quality,
+    }

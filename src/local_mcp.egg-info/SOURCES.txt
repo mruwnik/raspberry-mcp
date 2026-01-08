@@ -14,6 +14,7 @@ src/local_mcp.egg-info/top_level.txt
 src/local_mcp/lib/__init__.py
 src/local_mcp/lib/anime.py
 src/local_mcp/lib/music.py
+src/local_mcp/lib/torrent.py
 src/local_mcp/tools/__init__.py
 src/local_mcp/tools/anime.py
 src/local_mcp/tools/music.py
