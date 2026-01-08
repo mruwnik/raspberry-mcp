@@ -17,25 +17,32 @@ from local_mcp.settings import (
 
 class MPDError(Exception):
     """MPD protocol error."""
+
     pass
 
 
 @asynccontextmanager
-async def mpd_connection() -> AsyncIterator[tuple[asyncio.StreamReader, asyncio.StreamWriter]]:
+async def mpd_connection() -> AsyncIterator[
+    tuple[asyncio.StreamReader, asyncio.StreamWriter]
+]:
     """Context manager for MPD connection."""
     reader, writer = await asyncio.open_connection(MPD_HOST, MPD_PORT)
     try:
         # Read greeting (OK MPD x.x.x)
         greeting = await reader.readline()
         if not greeting.startswith(b"OK MPD"):
-            raise MPDError(f"Unexpected greeting: {greeting.decode()}")
+            raise MPDError(
+                f"Unexpected greeting: {greeting.decode('utf-8', errors='replace')}"
+            )
         yield reader, writer
     finally:
         writer.close()
         await writer.wait_closed()
 
 
-async def mpd_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, cmd: str) -> list[str]:
+async def mpd_command(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, cmd: str
+) -> list[str]:
     """Send command and read response lines until OK or ACK."""
     writer.write(f"{cmd}\n".encode())
     await writer.drain()
@@ -45,7 +52,7 @@ async def mpd_command(reader: asyncio.StreamReader, writer: asyncio.StreamWriter
         line = await reader.readline()
         if not line:
             raise MPDError("Connection closed")
-        line = line.decode().rstrip("\n")
+        line = line.decode("utf-8", errors="replace").rstrip("\n")
         if line == "OK":
             break
         if line.startswith("ACK"):
@@ -126,16 +133,20 @@ async def browse_directory(paths: list[str]) -> dict:
             directories = []
             for item in items:
                 if "file" in item:
-                    files.append({
-                        "file": item["file"],
-                        "title": item.get("Title", item["file"].split("/")[-1]),
-                        "duration": item.get("Time", ""),
-                    })
+                    files.append(
+                        {
+                            "file": item["file"],
+                            "title": item.get("Title", item["file"].split("/")[-1]),
+                            "duration": item.get("Time", ""),
+                        }
+                    )
                 elif "directory" in item:
-                    directories.append({
-                        "folder": item["directory"],
-                        "title": item["directory"].split("/")[-1],
-                    })
+                    directories.append(
+                        {
+                            "folder": item["directory"],
+                            "title": item["directory"].split("/")[-1],
+                        }
+                    )
 
             result[path] = {"files": files, "directories": directories}
         return result
@@ -182,13 +193,17 @@ async def _get_all_files_recursive(
     for item in items:
         if "file" in item:
             if not _should_skip(item["file"], skip_patterns):
-                files.append({
-                    "file": item["file"],
-                    "title": item.get("Title", item["file"].split("/")[-1]),
-                    "duration": item.get("Time", ""),
-                })
+                files.append(
+                    {
+                        "file": item["file"],
+                        "title": item.get("Title", item["file"].split("/")[-1]),
+                        "duration": item.get("Time", ""),
+                    }
+                )
         elif "directory" in item:
-            subfiles = await _get_all_files_recursive(reader, writer, item["directory"], skip_patterns)
+            subfiles = await _get_all_files_recursive(
+                reader, writer, item["directory"], skip_patterns
+            )
             files.extend(subfiles)
 
     return files
