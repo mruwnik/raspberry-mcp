@@ -11,14 +11,15 @@ load_dotenv()
 # =============================================================================
 # Server
 # =============================================================================
-SERVER_PORT = int(os.getenv("LOCAL_MCP_PORT", "3000"))
-SERVER_BASE_URL = os.getenv("LOCAL_MCP_BASE_URL", "http://localhost:3000")
+SERVER_PORT = int(os.getenv("LOCAL_MCP_PORT", "3001"))
+SERVER_BASE_URL = os.getenv("LOCAL_MCP_BASE_URL", "http://localhost:3001")
 
 
 # =============================================================================
 # Auth
 # =============================================================================
 HTPASSWD_PATH = Path(os.getenv("LOCAL_MCP_HTPASSWD", ".htpasswd"))
+TOKEN_DB_PATH = Path(os.getenv("LOCAL_MCP_TOKEN_DB", ".token_db.json"))
 
 
 # =============================================================================

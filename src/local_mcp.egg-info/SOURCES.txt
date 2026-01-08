@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 src/local_mcp/auth.py
 src/local_mcp/server.py

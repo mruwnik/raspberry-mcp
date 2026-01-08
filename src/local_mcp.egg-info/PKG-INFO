@@ -9,4 +9,4 @@ Requires-Dist: python-dotenv
 Requires-Dist: httpx
 Requires-Dist: beautifulsoup4
 Requires-Dist: passlib[bcrypt]
-Requires-Dist: bcrypt<5
+Requires-Dist: bcrypt<4.1

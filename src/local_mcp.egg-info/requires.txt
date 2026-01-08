@@ -3,4 +3,4 @@ python-dotenv
 httpx
 beautifulsoup4
 passlib[bcrypt]
-bcrypt<5
+bcrypt<4.1

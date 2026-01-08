@@ -10,7 +10,7 @@ dependencies = [
     "httpx",
     "beautifulsoup4",
     "passlib[bcrypt]",
-    "bcrypt<5",  # passlib compatibility
+    "bcrypt<4.1",      # passlib compatibility (4.1 removed __about__)
 ]
 
 [dependency-groups]
