@@ -11,6 +11,7 @@ dependencies = [
     "beautifulsoup4",
     "passlib[bcrypt]",
     "bcrypt<4.1",      # passlib compatibility (4.1 removed __about__)
+    "mcp",             # MCP client for anime-watch
 ]
 
 [dependency-groups]
@@ -19,6 +20,7 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
 [project.scripts]
 local-mcp = "local_mcp.server:main"
 anime-check = "local_mcp.lib.anime:main"
+anime-watch = "local_mcp.watch:main"
 
 [tool.uv]
 package = true

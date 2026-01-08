@@ -10,7 +10,10 @@ mcp = FastMCP(name="anime")
 
 
 @mcp.tool()
-async def anime_library(series: str | None = None) -> dict:
+def anime_library(
+    series: str | None = None,
+    status: anime.Status | None = None,
+) -> dict:
     """
     Get local anime library state.
 
@@ -18,19 +21,20 @@ async def anime_library(series: str | None = None) -> dict:
 
     Args:
         series: Optional series title to filter to a single series
+        status: Optional filter: "unwatched", "watched", or "stalled"
 
     Returns dict with:
         - series: list of series, each containing:
             - title, group, quality
-            - episodes: list of {episode, path, watched, stalled}
+            - episodes: list of {episode, path, status}
             - latest_episode: highest episode number on disk
             - latest_watched: highest watched episode number
     """
-    return await anime.get_library(series)
+    return anime.get_library(series, status)
 
 
 @mcp.tool()
-async def anime_mark(path: str, status: Literal["watched", "stalled"]) -> dict:
+def anime_mark(path: str, status: Literal["watched", "stalled"]) -> dict:
     """
     Mark an episode as watched or stalled.
 
@@ -40,20 +44,22 @@ async def anime_mark(path: str, status: Literal["watched", "stalled"]) -> dict:
 
     Returns confirmation of the action taken.
     """
-    return await anime.mark_episode(path, status)
+    return anime.mark_episode(path, status)
 
 
 @mcp.tool()
-async def anime_check(series: str | None = None, download: bool = False) -> dict:
+async def anime_check(download: bool = False) -> dict:
     """
-    Check nyaa.si for new episodes of tracked series.
+    Check trusted groups for new episodes of tracked series.
+
+    Fetches recent releases from SubsPlease and Erai-raws, matches against
+    library, and optionally downloads new episodes.
 
     Args:
-        series: Optional series title to check (default: check all)
         download: If True, download any new episodes found
 
     Returns:
         - available: list of {series, episode, torrent_url}
         - downloaded: list of downloaded episodes (if download=True)
     """
-    return await anime.check_episodes(series, download)
+    return await anime.check_trusted_releases(download)

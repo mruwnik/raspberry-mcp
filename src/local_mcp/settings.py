@@ -41,8 +41,7 @@ ANIME_HISTORY_FILE = ANIME_BASE_PATH / ".anime_history"
 ANIME_STALLED_DIR = ANIME_BASE_PATH / "stalled"
 ANIME_WATCH_DIR = ANIME_BASE_PATH / ".watch/start"
 
-ANIME_TORRENTS_URL = "https://nyaa.si"
-ANIME_TRUSTED_GROUPS = {"SubsPlease", "Erai-raws"}
+ANIME_TRUSTED_GROUPS = ["SubsPlease", "Erai-raws"]
 ANIME_VIDEO_GLOB = "[[]*.mkv"  # Match files starting with [ like "[SubsPlease] ..."
 
 

@@ -713,6 +713,7 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "fastmcp" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "passlib", extra = ["bcrypt"] },
     { name = "python-dotenv" },
 ]
@@ -729,6 +730,7 @@ requires-dist = [
     { name = "beautifulsoup4" },
     { name = "fastmcp", specifier = ">=2.14.2" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "passlib", extras = ["bcrypt"] },
     { name = "python-dotenv" },
 ]

@@ -3,6 +3,8 @@ pyproject.toml
 src/local_mcp/auth.py
 src/local_mcp/server.py
 src/local_mcp/settings.py
+src/local_mcp/token_db.py
+src/local_mcp/watch.py
 src/local_mcp.egg-info/PKG-INFO
 src/local_mcp.egg-info/SOURCES.txt
 src/local_mcp.egg-info/dependency_links.txt
@@ -19,3 +21,4 @@ tests/test_anime.py
 tests/test_auth.py
 tests/test_music.py
 tests/test_settings.py
+tests/test_token_db.py

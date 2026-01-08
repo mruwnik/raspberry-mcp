@@ -4,3 +4,4 @@ httpx
 beautifulsoup4
 passlib[bcrypt]
 bcrypt<4.1
+mcp
