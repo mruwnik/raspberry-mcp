@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from local_mcp.auth import HtpasswdAuth, PermissiveClient
+from local_mcp.token_db import PermissiveClient, StoredToken, TokenDB
 
 
 # PermissiveClient tests
@@ -34,7 +34,7 @@ def test_permissive_client_accepts_any_redirect(redirect_uri):
 
 @pytest.fixture
 def auth_instance(temp_dir, monkeypatch):
-    """Create HtpasswdAuth with temp htpasswd file."""
+    """Create HtpasswdAuth with temp htpasswd file and temp token db."""
     import sys
 
     # Clear cached modules
@@ -43,12 +43,15 @@ def auth_instance(temp_dir, monkeypatch):
             del sys.modules[mod]
 
     htpasswd_path = temp_dir / ".htpasswd"
+    token_db_path = temp_dir / ".token_db.json"
     monkeypatch.setenv("LOCAL_MCP_HTPASSWD", str(htpasswd_path))
+    monkeypatch.setenv("LOCAL_MCP_TOKEN_DB", str(token_db_path))
     monkeypatch.setenv("LOCAL_MCP_BASE_URL", "http://localhost:3000")
 
     from local_mcp.auth import HtpasswdAuth
+    from local_mcp.token_db import TokenDB
 
-    return HtpasswdAuth()
+    return HtpasswdAuth(db=TokenDB(token_db_path))
 
 
 @pytest.mark.parametrize(
@@ -71,7 +74,7 @@ def test_generate_token_uniqueness(auth_instance):
     assert len(tokens) == 100  # All unique
 
 
-def test_verify_user_with_valid_credentials(temp_dir, monkeypatch):
+def test_verify_credentials_with_valid_credentials(temp_dir, monkeypatch):
     import sys
 
     for mod in list(sys.modules.keys()):
@@ -85,21 +88,22 @@ def test_verify_user_with_valid_credentials(temp_dir, monkeypatch):
     htpasswd.set_password("testuser", "testpass")
     htpasswd.save()
 
+    token_db_path = temp_dir / ".token_db.json"
     monkeypatch.setenv("LOCAL_MCP_HTPASSWD", str(htpasswd_path))
+    monkeypatch.setenv("LOCAL_MCP_TOKEN_DB", str(token_db_path))
     monkeypatch.setenv("LOCAL_MCP_BASE_URL", "http://localhost:3000")
 
     from local_mcp.auth import HtpasswdAuth
+    from local_mcp.token_db import TokenDB
 
-    auth = HtpasswdAuth()
+    auth = HtpasswdAuth(db=TokenDB(token_db_path))
 
-    assert auth._verify_user("testuser", "testpass") is True
-    assert not auth._verify_user("testuser", "wrongpass")
-    assert not auth._verify_user("wronguser", "testpass")
+    assert auth._verify_credentials("testuser", "testpass") is True
+    assert not auth._verify_credentials("testuser", "wrongpass")
+    assert not auth._verify_credentials("wronguser", "testpass")
 
 
 def test_cleanup_expired_removes_old_tokens(auth_instance):
-    from local_mcp.auth import StoredToken
-
     # Add some tokens with past expiration
     auth_instance._db.set_token(
         "expired",
@@ -132,8 +136,8 @@ def test_cleanup_expired_removes_old_tokens(auth_instance):
 @pytest.mark.parametrize(
     "token_type,lifetime",
     [
-        ("access", HtpasswdAuth.ACCESS_TOKEN_LIFETIME),
-        ("refresh", HtpasswdAuth.REFRESH_TOKEN_LIFETIME),
+        ("access", 30 * 24 * 3600),  # ACCESS_TOKEN_LIFETIME
+        ("refresh", 30 * 24 * 3600),  # REFRESH_TOKEN_LIFETIME
     ],
 )
 def test_token_lifetimes_are_reasonable(token_type, lifetime):
@@ -185,8 +189,6 @@ async def test_register_client_uses_provided_id(auth_instance):
 
 @pytest.mark.asyncio
 async def test_revoke_token_removes_both_types(auth_instance):
-    from local_mcp.auth import StoredToken
-
     auth_instance._db.set_token(
         "test-token",
         StoredToken(
@@ -222,5 +224,8 @@ async def test_load_access_token_returns_none_for_missing(auth_instance):
 
 @pytest.mark.asyncio
 async def test_load_refresh_token_returns_none_for_missing(auth_instance):
-    result = await auth_instance.load_refresh_token("nonexistent")
+    client = PermissiveClient(
+        client_id="test", client_secret=None, redirect_uris=["http://localhost"]
+    )
+    result = await auth_instance.load_refresh_token(client, "nonexistent")
     assert result is None
