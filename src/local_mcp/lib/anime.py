@@ -44,7 +44,7 @@ class HistoryEntry(TypedDict, total=False):
     """History event entry (JSONL format)."""
 
     ts: str
-    action: str  # "watched" or "stalled"
+    action: str  # "watched", "stalled", or "downloaded"
     path: str
     series: str
     episode: float
@@ -340,6 +340,17 @@ async def check_episodes(series: str | None = None, download: bool = False) -> d
 
                 if download and ep.get("torrent"):
                     dest = download_torrent(ep)
+                    write_history_entry(
+                        HistoryEntry(
+                            ts=datetime.now(timezone.utc).isoformat(),
+                            action="downloaded",
+                            path=dest,
+                            series=s["title"],
+                            episode=ep["episode"],
+                            group=ep["group"],
+                            quality=ep["quality"],
+                        )
+                    )
                     downloaded.append({**entry, "downloaded_to": dest})
 
         except Exception as e:
