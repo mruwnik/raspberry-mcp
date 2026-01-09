@@ -385,7 +385,7 @@ def play_episode(path: str, input_conf_path: str) -> tuple[bool, float]:
 
     proc = subprocess.Popen(
         [
-            "mpv",
+            "/opt/homebrew/bin/mpv",
             f"--input-ipc-server={SOCKET_PATH}",
             "--no-input-default-bindings",
             f"--input-conf={input_conf_path}",
