@@ -14,6 +14,12 @@ mcp = FastMCP(name="anime")
 def anime_library(
     series: str | None = None,
     status: anime.Status | None = None,
+    search: str | None = None,
+    group: str | None = None,
+    since: str | None = None,
+    before: str | None = None,
+    min_episode: float | None = None,
+    max_episode: float | None = None,
 ) -> dict:
     """
     Get local anime library state.
@@ -21,8 +27,14 @@ def anime_library(
     Returns all tracked series with their episodes, watch status, and progress.
 
     Args:
-        series: Optional series title to filter to a single series
-        status: Optional filter: "unwatched", "watched", or "stalled"
+        series: Exact series title to filter to a single series
+        status: Filter: "unwatched", "watched", or "stalled"
+        search: Fuzzy search series titles (case-insensitive, matches substrings or all words)
+        group: Filter by release group (case-insensitive substring match)
+        since: Only series with activity after this ISO timestamp (e.g., "2024-01-15T00:00:00Z")
+        before: Only series with activity before this ISO timestamp
+        min_episode: Only series with at least this episode number
+        max_episode: Only series with episodes up to this number
 
     Returns dict with:
         - series: list of series, each containing:
@@ -31,7 +43,16 @@ def anime_library(
             - latest_episode: highest episode number on disk
             - latest_watched: highest watched episode number
     """
-    return anime.get_library(series, status)
+    return anime.get_library(
+        series=series,
+        status=status,
+        search=search,
+        group=group,
+        since=since,
+        before=before,
+        min_episode=min_episode,
+        max_episode=max_episode,
+    )
 
 
 @mcp.tool()

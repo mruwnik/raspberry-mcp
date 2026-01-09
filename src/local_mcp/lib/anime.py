@@ -372,17 +372,84 @@ async def check_trusted_releases(download: bool = False) -> dict:
     }
 
 
+def _fuzzy_match(query: str, target: str) -> bool:
+    """Basic fuzzy matching: case-insensitive substring or word matching.
+
+    Matches if:
+    - query is a substring of target (case-insensitive)
+    - all words in query appear in target (case-insensitive)
+    """
+    query_lower = query.lower()
+    target_lower = target.lower()
+
+    # Direct substring match
+    if query_lower in target_lower:
+        return True
+
+    # All query words appear in target
+    query_words = query_lower.split()
+    if all(word in target_lower for word in query_words):
+        return True
+
+    return False
+
+
+def _parse_timestamp(ts_str: str | None) -> datetime | None:
+    """Parse ISO timestamp string to datetime, returns None on failure."""
+    if not ts_str:
+        return None
+    try:
+        # Handle both with and without timezone
+        if ts_str.endswith("Z"):
+            ts_str = ts_str[:-1] + "+00:00"
+        return datetime.fromisoformat(ts_str)
+    except (ValueError, TypeError):
+        return None
+
+
+def _get_series_timestamps(history: list[HistoryEntry]) -> dict[str, datetime]:
+    """Get the most recent timestamp for each series from history."""
+    series_ts: dict[str, datetime] = {}
+    for entry in history:
+        series = entry.get("series")
+        ts = _parse_timestamp(entry.get("ts"))
+        if series and ts:
+            if series not in series_ts or ts > series_ts[series]:
+                series_ts[series] = ts
+    return series_ts
+
+
 def get_library(
     series: str | None = None,
     status: Status | None = None,
+    search: str | None = None,
+    group: str | None = None,
+    since: str | None = None,
+    before: str | None = None,
+    min_episode: float | None = None,
+    max_episode: float | None = None,
 ) -> dict:
     """Get local anime library state.
 
     Args:
-        series: Filter to a single series by title
+        series: Filter to a single series by exact title
         status: Filter by status: "unwatched", "watched", "stalled"
+        search: Fuzzy search series titles (case-insensitive substring/word match)
+        group: Filter by release group (case-insensitive substring)
+        since: Only series with activity after this ISO timestamp
+        before: Only series with activity before this ISO timestamp
+        min_episode: Only series with episodes >= this number
+        max_episode: Only series with episodes <= this number
     """
     library = build_library()
+
+    # Get history for timestamp filtering
+    history = _load_history_file() if (since or before) else []
+    series_timestamps = _get_series_timestamps(history) if history else {}
+
+    # Parse timestamp filters
+    since_dt = _parse_timestamp(since)
+    before_dt = _parse_timestamp(before)
 
     if series:
         if series in library:
@@ -390,6 +457,37 @@ def get_library(
         return {"series": [], "error": f"Series '{series}' not found"}
 
     result = list(library.values())
+
+    # Fuzzy search by title
+    if search:
+        result = [s for s in result if _fuzzy_match(search, s["title"])]
+
+    # Filter by release group
+    if group:
+        group_lower = group.lower()
+        result = [s for s in result if group_lower in s["group"].lower()]
+
+    # Filter by timestamp - series with recent activity
+    if since_dt:
+        result = [
+            s
+            for s in result
+            if s["title"] in series_timestamps and series_timestamps[s["title"]] >= since_dt
+        ]
+    if before_dt:
+        result = [
+            s
+            for s in result
+            if s["title"] in series_timestamps and series_timestamps[s["title"]] <= before_dt
+        ]
+
+    # Filter by episode range
+    if min_episode is not None:
+        result = [s for s in result if s["latest_episode"] >= min_episode]
+    if max_episode is not None:
+        result = [
+            s for s in result if any(e["episode"] <= max_episode for e in s["episodes"])
+        ]
 
     # Filter by status if requested
     if status == "unwatched":
