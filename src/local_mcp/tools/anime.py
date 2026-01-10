@@ -28,7 +28,7 @@ def anime_library(
 
     Args:
         series: Exact series title to filter to a single series
-        status: Filter: "unwatched", "watched", or "stalled"
+        status: Filter: "unwatched", "watched", "stalled", or "manual"
         search: Fuzzy search series titles (case-insensitive, matches substrings or all words)
         group: Filter by release group (case-insensitive substring match)
         since: Only series with activity after this ISO timestamp (e.g., "2024-01-15T00:00:00Z")
@@ -56,13 +56,14 @@ def anime_library(
 
 
 @mcp.tool()
-def anime_mark(path: str, status: Literal["watched", "stalled"]) -> dict:
+def anime_mark(path: str, status: Literal["watched", "stalled", "manual"]) -> dict:
     """
-    Mark an episode as watched or stalled.
+    Mark an episode as watched, stalled, or manual.
 
     Args:
         path: Path to the episode file
-        status: "watched" to add to history, "stalled" to move to stalled dir
+        status: "watched" to add to history, "stalled" to move to stalled dir,
+                "manual" to exclude from auto-queue (watch it yourself later)
 
     Returns confirmation of the action taken.
     """

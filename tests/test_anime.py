@@ -203,3 +203,79 @@ def test_write_history_entry_creates_jsonl(mock_anime_settings):
     entry = json.loads(content)
     assert entry["status"] == "watched"
     assert entry["series"] == "Test"
+
+
+def test_build_library_manual_episodes(mock_anime_settings):
+    """Test that manual episodes are detected from history."""
+    import json
+    temp_dir = mock_anime_settings
+    episode = temp_dir / "[SubsPlease] Manual Show - 01 [1080p].mkv"
+    episode.touch()
+
+    # Mark as manual in history (JSONL format)
+    history = temp_dir / ".anime_history"
+    entry = {"status": "manual", "path": str(episode), "series": "Manual Show", "episode": 1.0}
+    history.write_text(json.dumps(entry) + "\n")
+
+    from local_mcp.lib.anime import build_library
+    library = build_library()
+
+    assert "Manual Show" in library
+    assert library["Manual Show"]["episodes"][0]["status"] == "manual"
+
+
+def test_mark_episode_manual(mock_anime_settings):
+    """Test that mark_episode can mark as manual."""
+    temp_dir = mock_anime_settings
+    episode = temp_dir / "[SubsPlease] Test Show - 01 [1080p].mkv"
+    episode.touch()
+
+    from local_mcp.lib.anime import mark_episode
+    result = mark_episode(str(episode), "manual")
+
+    assert result["status"] == "manual"
+    assert result["path"] == str(episode)
+    # File should still exist (not moved like stalled)
+    assert episode.exists()
+
+
+def test_mark_episode_manual_recorded_in_history(mock_anime_settings):
+    """Test that marking as manual records entry in history."""
+    import json
+    temp_dir = mock_anime_settings
+    episode = temp_dir / "[SubsPlease] Test Show - 01 [1080p].mkv"
+    episode.touch()
+
+    from local_mcp.lib.anime import mark_episode
+    mark_episode(str(episode), "manual")
+
+    history = temp_dir / ".anime_history"
+    lines = history.read_text().strip().split("\n")
+    # Find the manual entry (skip the auto-added unwatched entry)
+    entries = [json.loads(line) for line in lines]
+    manual_entries = [e for e in entries if e.get("status") == "manual"]
+    assert len(manual_entries) == 1
+    assert manual_entries[0]["status"] == "manual"
+
+
+def test_get_library_filter_manual(mock_anime_settings):
+    """Test filtering library by manual status."""
+    import json
+    temp_dir = mock_anime_settings
+
+    # Create manual and unwatched episodes
+    manual_ep = temp_dir / "[SubsPlease] Manual Show - 01 [1080p].mkv"
+    manual_ep.touch()
+    unwatched_ep = temp_dir / "[SubsPlease] Other Show - 01 [1080p].mkv"
+    unwatched_ep.touch()
+
+    # Mark one as manual
+    history = temp_dir / ".anime_history"
+    entry = {"status": "manual", "path": str(manual_ep), "series": "Manual Show", "episode": 1.0}
+    history.write_text(json.dumps(entry) + "\n")
+
+    from local_mcp.lib.anime import get_library
+    result = get_library(status="manual")
+
+    assert len(result["series"]) == 1
+    assert result["series"][0]["title"] == "Manual Show"

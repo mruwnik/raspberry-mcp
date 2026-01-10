@@ -45,11 +45,16 @@ AUTH_PASSWORD = os.environ.get("AUTH_PASSWORD", "")
 CLIENT_ID = "anime-watch-cli"
 REDIRECT_URI = "http://localhost:18372/callback"  # Dummy, not actually used
 
+# Exit codes from mpv playback
+EXIT_NEXT = 0  # ENTER or natural end - continue to next episode
+EXIT_QUIT = 1  # q pressed - quit entirely
+EXIT_MANUAL = 2  # n pressed - mark as manual, continue
+
 # mpv input config (with --no-input-default-bindings, we define all needed keys)
-# Exit codes: 1=quit all, 0=next (ENTER or natural end)
 MPV_INPUT_CONF = """\
 q quit 1
 ENTER quit 0
+n quit 2
 SPACE cycle pause
 LEFT seek -5
 RIGHT seek 5
@@ -288,20 +293,37 @@ async def call_mcp_tool(session: ClientSession, name: str, args: dict) -> dict:
 
 
 async def get_unwatched_episodes(session: ClientSession) -> list[dict]:
-    """Get all unwatched episodes sorted by series then episode."""
+    """Get unwatched episodes, sorted by series with fewest unwatched first.
+
+    This prioritizes finishing series you're close to completing.
+    Only includes episodes with status='unwatched' (not 'manual', 'watched', or 'stalled').
+    """
     library = await call_mcp_tool(session, "anime_library", {"status": "unwatched"})
+
+    # Count unwatched episodes per series and collect episodes
+    series_counts: dict[str, int] = {}
     episodes = []
+
     for series in library.get("series", []):
-        for ep in series.get("episodes", []):
-            if ep.get("status") == "unwatched":
-                episodes.append(
-                    {
-                        "series": series["title"],
-                        "episode": ep["episode"],
-                        "path": ep["path"],
-                    }
-                )
-    return sorted(episodes, key=lambda e: (e["series"], e["episode"]))
+        title = series["title"]
+        unwatched_eps = [
+            ep for ep in series.get("episodes", []) if ep.get("status") == "unwatched"
+        ]
+        series_counts[title] = len(unwatched_eps)
+
+        for ep in unwatched_eps:
+            episodes.append(
+                {
+                    "series": title,
+                    "episode": ep["episode"],
+                    "path": ep["path"],
+                }
+            )
+
+    # Sort by: fewest unwatched episodes first, then series name, then episode number
+    return sorted(
+        episodes, key=lambda e: (series_counts[e["series"]], e["series"], e["episode"])
+    )
 
 
 # --- mpv Playback ---
@@ -366,12 +388,12 @@ def get_sftp_host() -> str:
     return parsed.hostname or "raspberry"
 
 
-def play_episode(path: str, input_conf_path: str) -> tuple[bool, float]:
+def play_episode(path: str, input_conf_path: str) -> tuple[int, float]:
     """
     Play episode with mpv over SFTP.
 
-    Returns: (should_continue, progress)
-    - should_continue: False if user pressed q (quit all)
+    Returns: (exit_code, progress)
+    - exit_code: 0=next, 1=quit all, 2=mark manual
     - progress: fraction of episode watched (0.0 to 1.0)
     """
     global _request_id
@@ -400,8 +422,8 @@ def play_episode(path: str, input_conf_path: str) -> tuple[bool, float]:
             break
         time.sleep(0.1)
     else:
-        proc.wait()
-        return True, 0.0
+        exit_code = proc.wait()
+        return exit_code, 0.0
 
     progress = 0.0
     sock = None
@@ -432,10 +454,7 @@ def play_episode(path: str, input_conf_path: str) -> tuple[bool, float]:
             sock.close()
 
     exit_code = proc.wait()
-    # 1=quit all, 0=next episode
-    should_continue = exit_code != 1
-
-    return should_continue, progress
+    return exit_code, progress
 
 
 # --- Main ---
@@ -463,7 +482,7 @@ async def run_session():
                 return
 
             print(f"Found {len(episodes)} unwatched episodes")
-            print("Controls: q=quit, ENTER=next, video end=next")
+            print("Controls: q=quit, ENTER=next, n=manual (watch later)")
             print()
 
             with tempfile.NamedTemporaryFile(
@@ -478,11 +497,17 @@ async def run_session():
                         f"[{i + 1}/{len(episodes)}] {ep['series']} - Episode {ep['episode']}"
                     )
 
-                    should_continue, progress = play_episode(
-                        ep["path"], input_conf_path
-                    )
+                    exit_code, progress = play_episode(ep["path"], input_conf_path)
 
-                    if progress >= 0.8:
+                    if exit_code == EXIT_MANUAL:
+                        # User pressed 'n' - mark as manual, continue
+                        print(f"  Marking as manual (watch later)")
+                        await call_mcp_tool(
+                            session,
+                            "anime_mark",
+                            {"path": ep["path"], "status": "manual"},
+                        )
+                    elif progress >= 0.8:
                         print(f"  Watched {progress:.0%}, marking as watched")
                         await call_mcp_tool(
                             session,
@@ -492,7 +517,7 @@ async def run_session():
                     else:
                         print(f"  Watched {progress:.0%}, not marking")
 
-                    if not should_continue:
+                    if exit_code == EXIT_QUIT:
                         print("\nQuitting...")
                         break
 

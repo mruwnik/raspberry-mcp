@@ -33,7 +33,8 @@ ANIME_NAME_REGEX = re.compile(
 # --- Types ---
 
 # Unified status - used for both current episode state and history events
-Status = Literal["unwatched", "watched", "stalled"]
+# "manual" means the episode should be watched manually, not in auto-queue
+Status = Literal["unwatched", "watched", "stalled", "manual"]
 
 
 class Episode(TypedDict, total=False):
@@ -173,7 +174,7 @@ def sync_history(disk_files: set[Path]) -> list[HistoryEntry]:
     Sync history with disk state.
 
     Combines JSONL entries with files on disk that aren't in history.
-    Files on disk without history entries are added as "unwatched".
+    Files in stalled directory are added as "stalled", others as "unwatched".
     Note: This function writes to the history file when new files are found.
     """
     ensure_paths()
@@ -184,10 +185,14 @@ def sync_history(disk_files: set[Path]) -> list[HistoryEntry]:
         # Get known paths from history
         known_paths = {Path(e["path"]).name for e in entries if "path" in e}
 
-        # Check disk for files not in history, add them as unwatched
+        # Check disk for files not in history
         for path in disk_files:
             if path.name not in known_paths:
-                entry = _build_history_entry("unwatched", path)
+                # Files in stalled dir start as "stalled", others as "unwatched"
+                initial_status: Status = (
+                    "stalled" if STALLED_DIR in path.parents else "unwatched"
+                )
+                entry = _build_history_entry(initial_status, path)
                 entries.append(entry)
                 _write_history_entry_unlocked(entry)
 
@@ -206,9 +211,19 @@ def write_history_entry(entry: HistoryEntry) -> None:
         _write_history_entry_unlocked(entry)
 
 
-def _watched_filenames(history: list[HistoryEntry]) -> set[str]:
-    """Get set of watched episode filenames from history."""
-    return {Path(e["path"]).name for e in history if e.get("status") == "watched"}
+def _latest_status_by_filename(history: list[HistoryEntry]) -> dict[str, Status]:
+    """Get the latest status for each filename from history.
+
+    Returns a dict mapping filename -> status, using the most recent entry
+    for each file (latest entry wins).
+    """
+    result: dict[str, Status] = {}
+    for entry in history:
+        if "path" in entry and "status" in entry:
+            filename = Path(entry["path"]).name
+            # Later entries overwrite earlier ones (latest wins)
+            result[filename] = entry["status"]
+    return result
 
 
 def _watched_episodes_by_series(history: list[HistoryEntry]) -> dict[str, float]:
@@ -230,10 +245,16 @@ def _watched_episodes_by_series(history: list[HistoryEntry]) -> dict[str, float]
 # --- Library ---
 
 
-def _episode_status(path: Path, watched_filenames: set[str]) -> Status:
-    """Determine episode status: 'watched', 'stalled', or 'unwatched'."""
-    if path.name in watched_filenames:
-        return "watched"
+def _episode_status(path: Path, status_by_filename: dict[str, Status]) -> Status:
+    """Determine episode status: 'watched', 'stalled', 'manual', or 'unwatched'.
+
+    Priority: history status > stalled directory > unwatched default.
+    Uses latest history entry for each file (latest wins).
+    """
+    # Check history first (latest entry wins)
+    if path.name in status_by_filename:
+        return status_by_filename[path.name]
+    # Files in stalled directory without explicit history status
     if STALLED_DIR in path.parents:
         return "stalled"
     return "unwatched"
@@ -243,14 +264,14 @@ def build_library() -> dict[str, Series]:
     """Build library state from disk entries, grouped by series."""
     disk_files = _get_disk_files()
     history = sync_history(disk_files)
-    watched = _watched_filenames(history)
+    status_by_filename = _latest_status_by_filename(history)
     history_watched = _watched_episodes_by_series(history)
 
     # Parse disk entries with status
     entries = []
     for path in sorted(disk_files):
         if ep := parse_episode(path.name, path=str(path)):
-            ep["status"] = _episode_status(path, watched)
+            ep["status"] = _episode_status(path, status_by_filename)
             entries.append(ep)
 
     series_map: dict[str, dict] = {}
@@ -433,7 +454,7 @@ def get_library(
 
     Args:
         series: Filter to a single series by exact title
-        status: Filter by status: "unwatched", "watched", "stalled"
+        status: Filter by status: "unwatched", "watched", "stalled", "manual"
         search: Fuzzy search series titles (case-insensitive substring/word match)
         group: Filter by release group (case-insensitive substring)
         since: Only series with activity after this ISO timestamp
@@ -490,27 +511,27 @@ def get_library(
         ]
 
     # Filter by status if requested
-    if status == "unwatched":
-        # Series with unwatched episodes
-        result = [
-            s for s in result if any(e["status"] == "unwatched" for e in s["episodes"])
-        ]
-    elif status == "watched":
-        # Series where all episodes are watched
+    if status == "watched":
+        # Special case: series where ALL episodes are watched
         result = [
             s for s in result if all(e["status"] == "watched" for e in s["episodes"])
         ]
-    elif status == "stalled":
-        # Series with stalled episodes
+    elif status:
+        # For unwatched/stalled/manual: series with at least one episode of that status
         result = [
-            s for s in result if any(e["status"] == "stalled" for e in s["episodes"])
+            s for s in result if any(e["status"] == status for e in s["episodes"])
         ]
 
     return {"series": sorted(result, key=lambda s: s["title"])}
 
 
-def mark_episode(path: str, status: Literal["watched", "stalled"]) -> dict:
-    """Mark an episode as watched or stalled."""
+def mark_episode(path: str, status: Literal["watched", "stalled", "manual"]) -> dict:
+    """Mark an episode as watched, stalled, or manual.
+
+    - watched: Records in history, file stays in place
+    - stalled: Moves file to stalled directory, records in history
+    - manual: Records in history, file stays in place (excluded from auto-queue)
+    """
     ensure_paths()
     episode_path = Path(path)
 
@@ -524,9 +545,10 @@ def mark_episode(path: str, status: Literal["watched", "stalled"]) -> dict:
         else:
             return {"error": f"Episode not found: {path}"}
 
-    if status == "watched":
-        write_history_entry(_build_history_entry("watched", episode_path))
-        return {"status": "watched", "path": str(episode_path)}
+    if status in ("watched", "manual"):
+        # Just record in history, file stays in place
+        write_history_entry(_build_history_entry(status, episode_path))
+        return {"status": status, "path": str(episode_path)}
 
     if status == "stalled":
         # Already in stalled dir? Just record in history, don't move
