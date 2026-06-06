@@ -112,10 +112,13 @@ async def player_command(commands: list[list[str]]) -> dict:
         status_lines = await mpd_command(reader, writer, "status")
         result.update(parse_response(status_lines))
 
-        # Get current song info if playing
+        # Get current song info if playing (with its rating, if any)
         if result.get("state") in ("play", "pause"):
-            song_lines = await mpd_command(reader, writer, "currentsong")
-            result["current_song"] = parse_response(song_lines)
+            song = parse_response(await mpd_command(reader, writer, "currentsong"))
+            uri = song.get("file")
+            if uri:
+                song["rating"] = await song_rating(reader, writer, uri)
+            result["current_song"] = song
 
         return result
 
@@ -128,6 +131,7 @@ async def browse_directory(paths: list[str]) -> dict:
             cmd = f'lsinfo "{path}"' if path else "lsinfo"
             lines = await mpd_command(reader, writer, cmd)
             items = parse_list_response(lines)
+            ratings = await ratings_map(reader, writer, path)
 
             files = []
             directories = []
@@ -138,6 +142,7 @@ async def browse_directory(paths: list[str]) -> dict:
                             "file": item["file"],
                             "title": item.get("Title", item["file"].split("/")[-1]),
                             "duration": item.get("Time", ""),
+                            "rating": ratings.get(item["file"]),
                         }
                     )
                 elif "directory" in item:
@@ -252,6 +257,40 @@ async def get_status() -> dict:
 def _quote(arg: str) -> str:
     """Quote an argument for the MPD protocol."""
     return '"' + arg.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def sticker_rating_to_stars(value: str) -> int:
+    """Convert a 0-10 MPD rating sticker to 0-5 stars."""
+    return round(int(value) / 2)
+
+
+async def song_rating(reader, writer, uri: str):
+    """Return a song's rating as 0-5 stars, or None if unrated."""
+    try:
+        lines = await mpd_command(reader, writer, f"sticker get song {_quote(uri)} rating")
+    except MPDError:
+        return None
+    sticker = parse_response(lines).get("sticker", "")
+    if sticker.startswith("rating="):
+        return sticker_rating_to_stars(sticker.split("=", 1)[1])
+    return None
+
+
+async def ratings_map(reader, writer, base: str) -> dict:
+    """Map uri -> 0-5 stars for every rated song under base, in one MPD call."""
+    try:
+        lines = await mpd_command(reader, writer, f"sticker find song {_quote(base)} rating")
+    except MPDError:
+        return {}
+    ratings: dict = {}
+    uri = None
+    for line in lines:
+        if line.startswith("file: "):
+            uri = line[6:]
+        elif line.startswith("sticker: rating=") and uri:
+            ratings[uri] = sticker_rating_to_stars(line.split("rating=", 1)[1])
+            uri = None
+    return ratings
 
 
 async def rate(stars: int, uri: str = "") -> dict:
