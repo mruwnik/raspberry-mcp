@@ -117,7 +117,9 @@ async def player_command(commands: list[list[str]]) -> dict:
             song = parse_response(await mpd_command(reader, writer, "currentsong"))
             uri = song.get("file")
             if uri:
-                song["rating"] = await song_rating(reader, writer, uri)
+                stars = await song_rating(reader, writer, uri)
+                if stars is not None:
+                    song["rating"] = stars
             result["current_song"] = song
 
         return result
@@ -137,14 +139,15 @@ async def browse_directory(paths: list[str]) -> dict:
             directories = []
             for item in items:
                 if "file" in item:
-                    files.append(
-                        {
-                            "file": item["file"],
-                            "title": item.get("Title", item["file"].split("/")[-1]),
-                            "duration": item.get("Time", ""),
-                            "rating": ratings.get(item["file"]),
-                        }
-                    )
+                    entry = {
+                        "file": item["file"],
+                        "title": item.get("Title", item["file"].split("/")[-1]),
+                        "duration": item.get("Time", ""),
+                    }
+                    stars = ratings.get(item["file"])
+                    if stars is not None:
+                        entry["rating"] = stars
+                    files.append(entry)
                 elif "directory" in item:
                     directories.append(
                         {
