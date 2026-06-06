@@ -93,3 +93,21 @@ async def mpd_get_status() -> dict:
     Returns info about current track, playback state, volume, etc.
     """
     return await music.get_status()
+
+
+@mcp.tool()
+async def mpd_rate(stars: int, uri: str = "") -> dict:
+    """
+    Rate a song 0-5 stars by setting its MPD `rating` sticker (0-10 scale).
+
+    Args:
+        stars: 0-5. 0 clears the rating. 1 marks the track for reaping (it
+            will be recoverably binned by the hourly host reaper).
+        uri: track path relative to the music directory; defaults to the
+            currently playing track.
+
+    Note: the server can only set the sticker. The durable file tag
+    (FMPS_RATING/POPM) is written, and 1-star tracks are binned, by the
+    hourly reaper running on the host.
+    """
+    return await music.rate(stars, uri)

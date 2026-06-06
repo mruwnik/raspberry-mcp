@@ -247,3 +247,41 @@ async def play_random_tracks(
 async def get_status() -> dict:
     """Get current MPD player status."""
     return await player_command([["status"]])
+
+
+def _quote(arg: str) -> str:
+    """Quote an argument for the MPD protocol."""
+    return '"' + arg.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+async def rate(stars: int, uri: str = "") -> dict:
+    """Set a track's rating sticker (0-5 stars -> 0-10 MPD `rating` sticker).
+
+    The server runs as a user that cannot write the music files, so this only
+    sets the MPD sticker; the durable file tag (FMPS_RATING/POPM) is written by
+    the hourly reaper on the host, which also bins anything left at 1 star.
+    """
+    if not 0 <= stars <= 5:
+        return {"error": "stars must be between 0 and 5"}
+    async with mpd_connection() as (reader, writer):
+        if not uri:
+            current = parse_response(await mpd_command(reader, writer, "currentsong"))
+            uri = current.get("file", "")
+        if not uri:
+            return {"error": "nothing is playing and no uri given"}
+        if stars == 0:
+            try:
+                await mpd_command(reader, writer, f"sticker delete song {_quote(uri)} rating")
+            except MPDError:
+                pass  # no existing rating sticker to clear
+        else:
+            value = stars * 2
+            await mpd_command(
+                reader, writer, f"sticker set song {_quote(uri)} rating {_quote(str(value))}"
+            )
+        return {
+            "uri": uri,
+            "stars": stars,
+            "rating_sticker": stars * 2,
+            "note": "sticker set; durable file tag + 1-star reaping handled by the hourly host reaper",
+        }
