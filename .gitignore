@@ -5,3 +5,4 @@ users.txt
 __pycache__
 *.pyc
 auth.db
+.DS_Store
