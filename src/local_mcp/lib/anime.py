@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
+from local_mcp.lib import ratings as ratings_lib
 from local_mcp.lib import torrent
 from local_mcp.settings import (
     ANIME_BASE_PATH as BASE_PATH,
@@ -440,6 +441,26 @@ def _get_series_timestamps(history: list[HistoryEntry]) -> dict[str, datetime]:
     return series_ts
 
 
+def _attach_ratings(series_list: list[dict]) -> list[dict]:
+    """Attach latest rating entry to each series (exact, then unique fuzzy)."""
+    latest = ratings_lib.latest_ratings()
+    for s in series_list:
+        entry = latest.get(s["title"])
+        if entry is None:
+            fuzzy = [
+                r
+                for title, r in latest.items()
+                if _fuzzy_match(s["title"], title) or _fuzzy_match(title, s["title"])
+            ]
+            entry = fuzzy[0] if len(fuzzy) == 1 else None
+        s["rating"] = (
+            {"rating": entry.get("rating"), "status": entry.get("status"), "ts": entry.get("ts")}
+            if entry
+            else None
+        )
+    return series_list
+
+
 def get_library(
     series: str | None = None,
     status: Status | None = None,
@@ -474,7 +495,7 @@ def get_library(
 
     if series:
         if series in library:
-            return {"series": [library[series]]}
+            return {"series": _attach_ratings([library[series]])}
         return {"series": [], "error": f"Series '{series}' not found"}
 
     result = list(library.values())
@@ -522,7 +543,7 @@ def get_library(
             s for s in result if any(e["status"] == status for e in s["episodes"])
         ]
 
-    return {"series": sorted(result, key=lambda s: s["title"])}
+    return {"series": _attach_ratings(sorted(result, key=lambda s: s["title"]))}
 
 
 def path_outside_anime_dirs(episode_path: Path) -> bool:
