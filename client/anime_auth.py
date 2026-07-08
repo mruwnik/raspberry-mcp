@@ -42,6 +42,12 @@ _result_holder: dict = {}
 
 class _CallbackHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        parsed_path = urllib.parse.urlparse(self.path).path
+        if parsed_path != "/callback":
+            self.send_response(404)
+            self.end_headers()
+            return
+
         params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         _result_holder["code"] = (params.get("code") or [None])[0]
         _result_holder["state"] = (params.get("state") or [None])[0]

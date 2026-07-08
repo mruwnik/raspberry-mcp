@@ -113,6 +113,7 @@ htpasswd .htpasswd newuser
 |------|-------------|
 | `anime_library` | Get local library state |
 | `anime_mark` | Mark episode as watched/stalled |
+| `anime_add` | Add a torrent to the download watch directory |
 | `anime_rate` | Rate a series and/or record its outcome |
 | `anime_search` | Search nyaa.si for series releases from a trusted group |
 
