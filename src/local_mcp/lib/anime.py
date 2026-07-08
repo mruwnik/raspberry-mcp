@@ -525,6 +525,15 @@ def get_library(
     return {"series": sorted(result, key=lambda s: s["title"])}
 
 
+def path_outside_anime_dirs(episode_path: Path) -> bool:
+    """True if the resolved path escapes BASE_PATH and STALLED_DIR."""
+    resolved = episode_path.resolve()
+    allowed = (BASE_PATH.resolve(), STALLED_DIR.resolve())
+    return not any(
+        resolved == root or resolved.is_relative_to(root) for root in allowed
+    )
+
+
 def mark_episode(path: str, status: Literal["watched", "stalled", "manual"]) -> dict:
     """Mark an episode as watched, stalled, or manual.
 
@@ -543,7 +552,13 @@ def mark_episode(path: str, status: Literal["watched", "stalled", "manual"]) -> 
                 episode_path = possible
                 break
         else:
+            explicit_path = episode_path.is_absolute() or ".." in episode_path.parts
+            if explicit_path and path_outside_anime_dirs(episode_path):
+                return {"error": f"Path outside anime directory: {path}"}
             return {"error": f"Episode not found: {path}"}
+
+    if path_outside_anime_dirs(episode_path):
+        return {"error": f"Path outside anime directory: {path}"}
 
     if status in ("watched", "manual"):
         # Just record in history, file stays in place
