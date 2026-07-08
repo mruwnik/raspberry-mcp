@@ -113,7 +113,16 @@ htpasswd .htpasswd newuser
 |------|-------------|
 | `anime_library` | Get local library state |
 | `anime_mark` | Mark episode as watched/stalled |
-| `anime_check` | Check nyaa.si for new episodes |
+| `anime_rate` | Rate a series and/or record its outcome |
+| `anime_search` | Search nyaa.si for series releases from a trusted group |
+
+### Watching from mpv
+
+mpv can act as the anime client: an OSD series menu, HTTPS streaming from
+the server, auto-marking episodes as watched at 80%, and rating prompts when
+a series ends. See [client/README.md](client/README.md) for installing
+`client/anime.lua`, the one-time OAuth login (`client/anime_auth.py`), and
+the `~/.config/anime-watch/config.json` keys.
 
 ## Development
 
