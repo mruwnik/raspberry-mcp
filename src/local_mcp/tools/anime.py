@@ -1,11 +1,11 @@
 """Anime download management tools."""
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, get_args
 
 from fastmcp import FastMCP
 
-from local_mcp.lib import anime, torrent
+from local_mcp.lib import anime, ratings, torrent
 
 mcp = FastMCP(name="anime")
 
@@ -68,6 +68,30 @@ def anime_mark(path: str, status: Literal["watched", "stalled", "manual"]) -> di
     Returns confirmation of the action taken.
     """
     return anime.mark_episode(path, status)
+
+
+@mcp.tool()
+def anime_rate(
+    series: str,
+    rating: float | None = None,
+    status: str = "finished",
+) -> dict:
+    """
+    Rate a series and/or record its outcome.
+
+    Args:
+        series: Series title (as shown in anime_library, or freeform)
+        rating: 0.5-5 in 0.5 steps, or omit (e.g. dropping without a rating)
+        status: "finished" (default), "dropped", or "watching"
+
+    Returns the written rating entry.
+    """
+    if status not in get_args(ratings.RatingStatus):
+        return {"error": f"Invalid status: {status}"}
+    try:
+        return dict(ratings.write_rating(series, rating, status))  # type: ignore[arg-type]
+    except ValueError as e:
+        return {"error": str(e)}
 
 
 @mcp.tool()

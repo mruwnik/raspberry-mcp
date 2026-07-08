@@ -94,3 +94,37 @@ def test_migrate_does_not_duplicate_existing_local(ratings_env):
     result = ratings.migrate_anime_planet(src)
     assert result["skipped"] == 1
     assert ratings.latest_ratings()["Some Show"]["rating"] == 4.5  # local wins
+
+
+def test_anime_rate_tool_writes_entry(ratings_env):
+    from local_mcp.tools.anime import anime_rate
+    result = anime_rate.fn(series="Grand Blue S3", rating=5.0, status="finished")
+    assert result.get("series") == "Grand Blue S3"
+    from local_mcp.lib import ratings
+    assert ratings.latest_ratings()["Grand Blue S3"]["rating"] == 5.0
+
+
+def test_anime_rate_tool_rejects_bad_rating(ratings_env):
+    from local_mcp.tools.anime import anime_rate
+    result = anime_rate.fn(series="X", rating=4.7, status="finished")
+    assert "error" in result
+
+
+def test_anime_rate_tool_rejects_bad_status(ratings_env):
+    from local_mcp.tools.anime import anime_rate
+    result = anime_rate.fn(series="X", rating=4.0, status="paused")
+    assert "error" in result
+
+
+def test_library_enriched_with_ratings(ratings_env, monkeypatch):
+    from local_mcp.lib import anime, ratings
+    monkeypatch.setattr(anime, "BASE_PATH", ratings_env)
+    monkeypatch.setattr(anime, "STALLED_DIR", ratings_env / "stalled")
+    monkeypatch.setattr(anime, "HISTORY_FILE", ratings_env / ".anime_history")
+    monkeypatch.setattr(anime, "HISTORY_LOCK_FILE", ratings_env / ".anime_history.lock")
+    monkeypatch.setattr(anime, "WATCH_DIR", ratings_env / ".watch/start")
+    (ratings_env / "[SubsPlease] Grand Blue S3 - 01 (1080p) [ABC].mkv").touch()
+    ratings.write_rating("Grand Blue S3", 5.0, "watching")
+    lib = anime.get_library()
+    series = {s["title"]: s for s in lib["series"]}
+    assert series["Grand Blue S3"]["rating"]["rating"] == 5.0
