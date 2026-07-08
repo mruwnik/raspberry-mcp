@@ -279,3 +279,41 @@ def test_get_library_filter_manual(mock_anime_settings):
 
     assert len(result["series"]) == 1
     assert result["series"][0]["title"] == "Manual Show"
+
+
+# Path traversal guard
+
+@pytest.mark.parametrize("evil", [
+    "/etc/passwd",
+    "../../../etc/passwd",
+    "/media/data/Unsorted/../../../etc/passwd",
+])
+def test_mark_episode_rejects_paths_outside_base(temp_dir, evil):
+    from local_mcp.lib import anime
+    with patch.multiple(
+        anime,
+        BASE_PATH=temp_dir,
+        STALLED_DIR=temp_dir / "stalled",
+        HISTORY_FILE=temp_dir / ".anime_history",
+        HISTORY_LOCK_FILE=temp_dir / ".anime_history.lock",
+        WATCH_DIR=temp_dir / ".watch/start",
+    ):
+        result = anime.mark_episode(evil, "watched")
+        assert "error" in result
+        assert "outside" in result["error"].lower()
+
+
+def test_mark_episode_still_accepts_paths_inside_base(temp_dir):
+    from local_mcp.lib import anime
+    f = temp_dir / "[SubsPlease] Frieren - 01 [1080p].mkv"
+    f.touch()
+    with patch.multiple(
+        anime,
+        BASE_PATH=temp_dir,
+        STALLED_DIR=temp_dir / "stalled",
+        HISTORY_FILE=temp_dir / ".anime_history",
+        HISTORY_LOCK_FILE=temp_dir / ".anime_history.lock",
+        WATCH_DIR=temp_dir / ".watch/start",
+    ):
+        result = anime.mark_episode(str(f), "watched")
+        assert result.get("status") == "watched"
