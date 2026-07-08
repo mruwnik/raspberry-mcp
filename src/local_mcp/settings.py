@@ -38,6 +38,7 @@ MPD_SKIP_PATTERNS: list[str] = [p.strip() for p in _skip_env.split(",") if p.str
 # =============================================================================
 ANIME_BASE_PATH = Path(os.getenv("ANIME_BASE_PATH", "/media/data/Unsorted"))
 ANIME_HISTORY_FILE = ANIME_BASE_PATH / ".anime_history"
+ANIME_RATINGS_FILE = ANIME_BASE_PATH / ".anime_ratings"
 ANIME_STALLED_DIR = ANIME_BASE_PATH / "stalled"
 ANIME_WATCH_DIR = ANIME_BASE_PATH / ".watch/start"
 
