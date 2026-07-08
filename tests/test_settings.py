@@ -27,7 +27,6 @@ def test_settings_has_expected_attributes():
     assert hasattr(settings, "ANIME_HISTORY_FILE")
     assert hasattr(settings, "ANIME_STALLED_DIR")
     assert hasattr(settings, "ANIME_WATCH_DIR")
-    assert hasattr(settings, "ANIME_TORRENTS_URL")
     assert hasattr(settings, "ANIME_TRUSTED_GROUPS")
     assert hasattr(settings, "ANIME_VIDEO_GLOB")
 
@@ -48,8 +47,7 @@ def test_settings_types():
     assert isinstance(settings.ANIME_HISTORY_FILE, Path)
     assert isinstance(settings.ANIME_STALLED_DIR, Path)
     assert isinstance(settings.ANIME_WATCH_DIR, Path)
-    assert isinstance(settings.ANIME_TORRENTS_URL, str)
-    assert isinstance(settings.ANIME_TRUSTED_GROUPS, set)
+    assert isinstance(settings.ANIME_TRUSTED_GROUPS, list)
     assert isinstance(settings.ANIME_VIDEO_GLOB, str)
     assert isinstance(settings.CACHE_TIMEOUT, int)
 
@@ -121,12 +119,6 @@ def test_video_glob_pattern():
     # Should match files starting with [
     assert "[" in settings.ANIME_VIDEO_GLOB
     assert ".mkv" in settings.ANIME_VIDEO_GLOB
-
-
-def test_torrents_url_is_valid():
-    from local_mcp import settings
-
-    assert settings.ANIME_TORRENTS_URL.startswith("https://")
 
 
 def test_cache_timeout_is_positive():
