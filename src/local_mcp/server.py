@@ -58,6 +58,7 @@ def main() -> None:
         transport="streamable-http",
         path="/mcp",
         middleware=custom_middleware,
+        stateless_http=True,
     )
     uvicorn.run(http_app, host="0.0.0.0", port=SERVER_PORT)
 
