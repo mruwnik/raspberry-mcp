@@ -281,6 +281,40 @@ def test_get_library_filter_manual(mock_anime_settings):
     assert result["series"][0]["title"] == "Manual Show"
 
 
+def test_get_library_last_activity_reflects_latest_entry(mock_anime_settings):
+    """last_activity should be the most recent history ts for the series (latest wins)."""
+    import json
+    temp_dir = mock_anime_settings
+
+    active_ep = temp_dir / "[SubsPlease] Active Show - 01 [1080p].mkv"
+    active_ep.touch()
+
+    history = temp_dir / ".anime_history"
+    entries = [
+        {"ts": "2024-01-01T00:00:00Z", "status": "watched", "path": str(active_ep),
+         "series": "Active Show", "episode": 1.0},
+        {"ts": "2024-06-15T12:00:00Z", "status": "watched", "path": str(active_ep),
+         "series": "Active Show", "episode": 1.0},
+    ]
+    history.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
+    from local_mcp.lib.anime import get_library
+    result = get_library()
+
+    by_title = {s["title"]: s for s in result["series"]}
+    assert by_title["Active Show"]["last_activity"] == "2024-06-15T12:00:00+00:00"
+
+
+def test_attach_last_activity_none_when_series_missing_timestamp():
+    """Series with no matching entry in the timestamps map get last_activity=None."""
+    from local_mcp.lib.anime import _attach_last_activity
+
+    series_list = [{"title": "No History Show"}]
+    result = _attach_last_activity(series_list, {})
+
+    assert result[0]["last_activity"] is None
+
+
 # Path traversal guard
 
 @pytest.mark.parametrize("evil", [

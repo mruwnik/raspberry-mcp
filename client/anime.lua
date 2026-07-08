@@ -20,6 +20,7 @@ local AUTH_FILE = CONFIG_DIR .. "/auth.json"
 local RETRY_FILE = CONFIG_DIR .. "/pending-calls.jsonl"
 local WATCHED_THRESHOLD = 0.8
 local CLIENT_ID = "anime-watch-cli"  -- must match watch.py / anime_auth.py
+local MENU_VISIBLE_ROWS = 15  -- OSD menu viewport height, in series rows
 
 local config = {}
 local auth = {}
@@ -60,6 +61,24 @@ local function urlencode(s)
   return (s:gsub("[^%w%-%.%_%~%/]", function(c)
     return string.format("%%%02X", string.byte(c))
   end))
+end
+
+local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+local function base64_encode(data)
+  local out = {}
+  for i = 1, #data, 3 do
+    local a, b, c = data:byte(i, i + 2)
+    local n = a * 65536 + (b or 0) * 256 + (c or 0)
+    local i1 = math.floor(n / 262144) % 64
+    local i2 = math.floor(n / 4096) % 64
+    local i3 = math.floor(n / 64) % 64
+    local i4 = n % 64
+    table.insert(out, B64_CHARS:sub(i1 + 1, i1 + 1) .. B64_CHARS:sub(i2 + 1, i2 + 1)
+      .. (b and B64_CHARS:sub(i3 + 1, i3 + 1) or "=")
+      .. (c and B64_CHARS:sub(i4 + 1, i4 + 1) or "="))
+  end
+  return table.concat(out)
 end
 
 -- ---------- curl / MCP ----------
@@ -175,7 +194,7 @@ local function ensure_auth(and_then)
   }, function()
     auth = read_json(AUTH_FILE) or {}
     if auth.access_token then osd("Logged in.", 2); and_then()
-    else osd("Login failed — see terminal / retry with key a", 8) end
+    else osd("Login failed — run " .. config.auth_helper .. " in a terminal to see why, then retry with key a", 10) end
   end)
 end
 
@@ -198,7 +217,15 @@ local function load_library(and_then)
   for _, s in ipairs(result.series or {}) do
     if #unwatched(s) > 0 then table.insert(state.series, s) end
   end
-  table.sort(state.series, function(a, b) return a.title < b.title end)
+  -- Newest activity first; series with no history timestamp sort last, alphabetically.
+  table.sort(state.series, function(a, b)
+    if a.last_activity and b.last_activity then
+      return a.last_activity > b.last_activity
+    elseif a.last_activity or b.last_activity then
+      return a.last_activity ~= nil
+    end
+    return a.title < b.title
+  end)
   and_then()
 end
 
@@ -206,13 +233,32 @@ local menu_overlay = mp.create_osd_overlay("ass-events")
 
 local function render_menu()
   local lines = { "{\\b1}Anime — unwatched{\\b0}", "" }
-  for i, s in ipairs(state.series) do
-    local marker = (i == state.selected) and "▶ " or "   "
-    local eps = unwatched(s)
-    table.insert(lines, string.format("%s%s   {\\alpha&H80&}%d new{\\alpha&H00&}",
-      marker, s.title, #eps))
+  local total = #state.series
+  if total == 0 then
+    table.insert(lines, "nothing unwatched — nice.")
+  else
+    -- Window ~MENU_VISIBLE_ROWS rows around the selection so it's always visible.
+    local first = 1
+    local last = total
+    if total > MENU_VISIBLE_ROWS then
+      first = state.selected - math.floor(MENU_VISIBLE_ROWS / 2)
+      first = math.max(1, math.min(first, total - MENU_VISIBLE_ROWS + 1))
+      last = first + MENU_VISIBLE_ROWS - 1
+    end
+    if first > 1 then
+      table.insert(lines, string.format("{\\alpha&H80&}↑ %d more{\\alpha&H00&}", first - 1))
+    end
+    for i = first, last do
+      local s = state.series[i]
+      local marker = (i == state.selected) and "▶ " or "   "
+      local eps = unwatched(s)
+      table.insert(lines, string.format("%s%s   {\\alpha&H80&}%d new{\\alpha&H00&}",
+        marker, s.title, #eps))
+    end
+    if last < total then
+      table.insert(lines, string.format("{\\alpha&H80&}↓ %d more{\\alpha&H00&}", total - last))
+    end
   end
-  if #state.series == 0 then table.insert(lines, "nothing unwatched — nice.") end
   table.insert(lines, "")
   table.insert(lines, "{\\alpha&H80&}[↑↓] select  [⏎] play  [d] drop  [q/esc] close{\\alpha&H00&}")
   menu_overlay.data = table.concat(lines, "\\N")
@@ -390,10 +436,6 @@ else
   if config.http_user and config.http_pass then
     -- basic auth for the files host when outside the LAN
     mp.set_property("http-header-fields",
-      "Authorization: Basic " .. mp.command_native({
-        name = "subprocess", capture_stdout = true, playback_only = false,
-        args = { "sh", "-c", "printf '%s' \"$1:$2\" | base64", "_",
-                 config.http_user, config.http_pass },
-      }).stdout:gsub("%s+$", ""))
+      "Authorization: Basic " .. base64_encode(config.http_user .. ":" .. config.http_pass))
   end
 end

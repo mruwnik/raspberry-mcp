@@ -42,6 +42,7 @@ def anime_library(
             - episodes: list of {episode, path, status}
             - latest_episode: highest episode number on disk
             - latest_watched: highest watched episode number
+            - last_activity: ISO timestamp of the series' most recent history entry, or None
     """
     return anime.get_library(
         series=series,

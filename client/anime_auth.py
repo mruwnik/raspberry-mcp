@@ -169,7 +169,11 @@ def main() -> int:
         print("State mismatch - aborting", file=sys.stderr)
         return 1
 
-    tokens = exchange_code(base, _result_holder["code"], code_verifier)
+    try:
+        tokens = exchange_code(base, _result_holder["code"], code_verifier)
+    except (OSError, ValueError) as e:
+        print(f"Token exchange failed: {e}", file=sys.stderr)
+        return 1
     save_auth(tokens, base)
     print(f"Wrote {TOKEN_FILE}")
     return 0

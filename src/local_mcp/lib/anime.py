@@ -441,6 +441,16 @@ def _get_series_timestamps(history: list[HistoryEntry]) -> dict[str, datetime]:
     return series_ts
 
 
+def _attach_last_activity(
+    series_list: list[dict], series_timestamps: dict[str, datetime]
+) -> list[dict]:
+    """Attach the most-recent history timestamp (ISO string) to each series, or None."""
+    for s in series_list:
+        ts = series_timestamps.get(s["title"])
+        s["last_activity"] = ts.isoformat() if ts else None
+    return series_list
+
+
 def _attach_ratings(series_list: list[dict]) -> list[dict]:
     """Attach latest rating entry to each series (exact, then unique fuzzy)."""
     latest = ratings_lib.latest_ratings()
@@ -485,8 +495,8 @@ def get_library(
     """
     library = build_library()
 
-    # Get history for timestamp filtering
-    history = _load_history_file() if (since or before) else []
+    # History is needed for since/before filtering and for last_activity
+    history = _load_history_file()
     series_timestamps = _get_series_timestamps(history) if history else {}
 
     # Parse timestamp filters
@@ -495,7 +505,8 @@ def get_library(
 
     if series:
         if series in library:
-            return {"series": _attach_ratings([library[series]])}
+            single = _attach_last_activity([library[series]], series_timestamps)
+            return {"series": _attach_ratings(single)}
         return {"series": [], "error": f"Series '{series}' not found"}
 
     result = list(library.values())
@@ -543,6 +554,7 @@ def get_library(
             s for s in result if any(e["status"] == status for e in s["episodes"])
         ]
 
+    result = _attach_last_activity(result, series_timestamps)
     return {"series": _attach_ratings(sorted(result, key=lambda s: s["title"]))}
 
 
@@ -573,6 +585,9 @@ def mark_episode(path: str, status: Literal["watched", "stalled", "manual"]) -> 
                 episode_path = possible
                 break
         else:
+            # Only a path that looks deliberately targeted (absolute, or containing
+            # "..") warrants the escape check; a bare filename that's simply missing
+            # should just read as not-found rather than as an outside-directory error.
             explicit_path = episode_path.is_absolute() or ".." in episode_path.parts
             if explicit_path and path_outside_anime_dirs(episode_path):
                 return {"error": f"Path outside anime directory: {path}"}
