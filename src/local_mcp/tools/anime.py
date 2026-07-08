@@ -128,3 +128,27 @@ def anime_add(
         "group": group,
         "quality": quality,
     }
+
+
+@mcp.tool()
+async def anime_search(
+    query: str,
+    group: str = "SubsPlease",
+    quality: str = "1080",
+) -> dict:
+    """
+    Search nyaa.si for series releases from a trusted group.
+
+    Args:
+        query: Series name (romaji or English, as release groups title it)
+        group: Release group (default SubsPlease)
+        quality: Quality filter substring (default 1080)
+
+    Returns {"results": [...]} — pass a result's `torrent` URL to anime_add
+    (typically episode 1; the anime-check cron then auto-fetches the rest).
+    """
+    try:
+        results = await torrent.search_releases(query, group=group, quality=quality)
+    except Exception as e:
+        return {"error": f"nyaa search failed: {e}"}
+    return {"results": results}

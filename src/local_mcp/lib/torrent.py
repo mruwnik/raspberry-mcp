@@ -5,6 +5,7 @@ import shutil
 import re
 from pathlib import Path
 from typing import TypedDict
+from urllib.parse import quote_plus
 from urllib.request import urlretrieve
 
 import httpx
@@ -221,4 +222,35 @@ async def fetch_group_releases(group: str, pages: int = 3) -> list[TorrentInfo]:
                 if info := _parse_row(row):
                     results.append(info)
 
+    return results
+
+
+async def search_releases(
+    query: str,
+    group: str = "SubsPlease",
+    quality: str = "1080",
+    pages: int = 1,
+) -> list[TorrentInfo]:
+    """Search nyaa.si for a series by name within a trusted group.
+
+    Same trusted/English filters as fetch_group_releases (f=2, c=1_2).
+    """
+    results = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; anime-checker/1.0)",
+        "Accept-Encoding": "gzip, deflate",
+    }
+    q = quote_plus(f"{group} {query} {quality}")
+
+    async with httpx.AsyncClient(headers=headers) as client:
+        for page in range(1, pages + 1):
+            url = f"{NYAA_BASE_URL}/?f=2&c=1_2&q={q}"
+            if page > 1:
+                url += f"&p={page}"
+            response = await client.get(url, timeout=30.0)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            for row in soup.find_all("tr", attrs={"class": "success"}):
+                if info := _parse_row(row):
+                    results.append(info)
     return results
