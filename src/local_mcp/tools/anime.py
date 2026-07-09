@@ -39,7 +39,7 @@ def anime_library(
     Returns dict with:
         - series: list of series, each containing:
             - title, group, quality
-            - episodes: list of {episode, path, status}
+            - episodes: list of {episode, path, status, is_final}
             - latest_episode: highest episode number on disk
             - latest_watched: highest watched episode number
             - last_activity: ISO timestamp of the series' most recent history entry, or None

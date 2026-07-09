@@ -3,7 +3,10 @@
 An mpv script that turns mpv into the anime watch flow client: it lists
 unwatched series from the MCP server, plays episodes back-to-back over
 HTTPS, auto-marks episodes watched at 80%, and prompts for a series
-rating when a series runs out (or when you drop it).
+rating when the series' last available episode is tagged as the finale
+(or when you drop it). If you're just caught up on an airing series —
+not actually done — it shows a brief OSD instead of nagging you for a
+rating; rate it yourself anytime with `r` in the menu.
 
 ## Install
 
@@ -69,6 +72,7 @@ Menu (`a` opens it; it also opens automatically when mpv starts idle):
 | `↑` / `↓` | Select series                       |
 | `Enter`   | Play all unwatched episodes in order|
 | `d`       | Drop the selected series (opens the rating prompt with status `dropped`) |
+| `r`       | Rate the selected series now (opens the rating prompt with status `finished`) |
 | `q` / `Esc` | Close the menu                    |
 
 During playback:
@@ -77,7 +81,8 @@ During playback:
 |-----|----------------------------------------------------|
 | `n` | Mark current episode `manual` (watch later) + next |
 
-Rating prompt (appears when the last queued episode finishes, or on drop):
+Rating prompt (appears when the last queued episode is the series finale,
+or on drop, or when you press `r` in the menu):
 
 | Key       | Action                                              |
 |-----------|-----------------------------------------------------|

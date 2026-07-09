@@ -1,7 +1,9 @@
 -- anime.lua — mpv as the anime client.
 -- Menu of unwatched series from the MCP server; back-to-back playback over
--- HTTPS; auto-mark watched at 80%; series rating prompt when a series runs
--- out (or on drop). Config: ~/.config/anime-watch/config.json
+-- HTTPS; auto-mark watched at 80%; series rating prompt when the series'
+-- last available episode is the finale (or on drop) — otherwise just an
+-- OSD nudge to rate manually with `r` in the menu. Config:
+-- ~/.config/anime-watch/config.json
 --   { "mcp_url": "https://ahiru.pl/mcp",
 --     "files_url": "https://media.ahiru.pl/files/Unsorted/",
 --     "http_user": "dan", "http_pass": "...",          -- for files outside LAN
@@ -37,6 +39,7 @@ local state = {
   rating_series = nil,
   rating_status = "finished",
   last_end_reason = nil,
+  current_series_is_final = false,  -- does the queued series' last episode carry the finale marker?
 }
 
 -- ---------- small utils ----------
@@ -260,7 +263,7 @@ local function render_menu()
     end
   end
   table.insert(lines, "")
-  table.insert(lines, "{\\alpha&H80&}[↑↓] select  [⏎] play  [d] drop  [q/esc] close{\\alpha&H00&}")
+  table.insert(lines, "{\\alpha&H80&}[↑↓] select  [⏎] play  [d] drop  [r] rate  [q/esc] close{\\alpha&H00&}")
   menu_overlay.data = table.concat(lines, "\\N")
   menu_overlay:update()
 end
@@ -268,7 +271,7 @@ end
 local function close_menu()
   state.menu_open = false
   menu_overlay:remove()
-  for _, key in ipairs({ "UP", "DOWN", "ENTER", "d", "q", "ESC" }) do
+  for _, key in ipairs({ "UP", "DOWN", "ENTER", "d", "r", "q", "ESC" }) do
     mp.remove_key_binding("animenu_" .. key)
   end
 end
@@ -279,7 +282,9 @@ local function play_selected()
   close_menu()
   state.current_series = s.title
   state.queue = {}
-  for _, ep in ipairs(unwatched(s)) do table.insert(state.queue, ep.path) end
+  local eps = unwatched(s)
+  state.current_series_is_final = #eps > 0 and eps[#eps].is_final or false
+  for _, ep in ipairs(eps) do table.insert(state.queue, ep.path) end
   mp.commandv("playlist-clear")
   local first = true
   for _, path in ipairs(state.queue) do
@@ -366,6 +371,10 @@ local function open_menu()
         local s = state.series[state.selected]
         if s then close_menu(); open_rating(s.title, "dropped") end
       end)
+      mp.add_forced_key_binding("r", "animenu_r", function()
+        local s = state.series[state.selected]
+        if s then close_menu(); open_rating(s.title, "finished") end
+      end)
       mp.add_forced_key_binding("q", "animenu_q", close_menu)
       mp.add_forced_key_binding("ESC", "animenu_ESC", close_menu)
       render_menu()
@@ -419,11 +428,18 @@ mp.add_key_binding("a", "anime-menu", open_menu)
 
 mp.observe_property("idle-active", "bool", function(_, idle)
   if not idle then return end
-  -- queued series ran out naturally: rate it
+  -- queued series ran out naturally
   if state.current_series and state.last_end_reason == "eof" then
     local series = state.current_series
+    local is_final = state.current_series_is_final
     state.current_series = nil
-    return open_rating(series, "finished")
+    if is_final then
+      return open_rating(series, "finished")
+    end
+    -- Only caught up on episodes released so far — not actually done with
+    -- the series, so don't nag for a rating every time a new episode airs.
+    osd("caught up on " .. series .. " — press r in the menu to rate it", 4)
+    return
   end
   if not state.menu_open and not state.rating_open then open_menu() end
 end)

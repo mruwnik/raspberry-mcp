@@ -39,19 +39,19 @@ def test_anime_name_regex_matches(filename, expected_match):
 @pytest.mark.parametrize("filename,expected_groups", [
     (
         "[SubsPlease] Frieren - Beyond Journey's End - 01 [1080p].mkv",
-        {"group": "SubsPlease", "title": "Frieren - Beyond Journey's End", "episode": "01", "quality": "1080p"},
+        {"group": "SubsPlease", "title": "Frieren - Beyond Journey's End", "episode": "01", "quality": "1080p", "final": None},
     ),
     (
         "[SubsPlease] Dandadan - 05 [1080p].mkv",
-        {"group": "SubsPlease", "title": "Dandadan", "episode": "05", "quality": "1080p"},
+        {"group": "SubsPlease", "title": "Dandadan", "episode": "05", "quality": "1080p", "final": None},
     ),
     (
         "[Erai-raws] Show - 28 END [1080p][Multiple Subtitle].mkv",
-        {"group": "Erai-raws", "title": "Show", "episode": "28", "quality": "1080p"},
+        {"group": "Erai-raws", "title": "Show", "episode": "28", "quality": "1080p", "final": "END"},
     ),
     (
         "[SubsPlease] Show - 10 [v2][1080p].mkv",
-        {"group": "SubsPlease", "title": "Show", "episode": "10", "quality": "1080p"},
+        {"group": "SubsPlease", "title": "Show", "episode": "10", "quality": "1080p", "final": None},
     ),
 ])
 def test_anime_name_regex_groups(filename, expected_groups):
@@ -67,15 +67,15 @@ def test_anime_name_regex_groups(filename, expected_groups):
 @pytest.mark.parametrize("filename,expected", [
     (
         "[SubsPlease] Frieren - 01 [1080p].mkv",
-        {"group": "SubsPlease", "title": "Frieren", "episode": 1.0, "quality": "1080p"},
+        {"group": "SubsPlease", "title": "Frieren", "episode": 1.0, "quality": "1080p", "is_final": False},
     ),
     (
         "[SubsPlease] Dandadan - 12 [1080p].mkv",
-        {"group": "SubsPlease", "title": "Dandadan", "episode": 12.0, "quality": "1080p"},
+        {"group": "SubsPlease", "title": "Dandadan", "episode": 12.0, "quality": "1080p", "is_final": False},
     ),
     (
         "[Erai-raws] Show Name - 05 END [720p].mkv",
-        {"group": "Erai-raws", "title": "Show Name", "episode": 5.0, "quality": "720p"},
+        {"group": "Erai-raws", "title": "Show Name", "episode": 5.0, "quality": "720p", "is_final": True},
     ),
 ])
 def test_parse_episode_valid(filename, expected):
@@ -85,6 +85,17 @@ def test_parse_episode_valid(filename, expected):
     assert result["title"] == expected["title"]
     assert result["episode"] == expected["episode"]
     assert result["quality"] == expected["quality"]
+    assert result["is_final"] == expected["is_final"]
+
+
+@pytest.mark.parametrize("filename,expected_is_final", [
+    ("[Erai-raws] Sousou no Frieren - 28 END [1080p][Multiple Subtitle].mkv", True),
+    ("[SubsPlease] Dandadan - 05 [1080p].mkv", False),
+])
+def test_parse_episode_is_final(filename, expected_is_final):
+    result = parse_episode(filename)
+    assert result is not None
+    assert result["is_final"] == expected_is_final
 
 
 @pytest.mark.parametrize("filename", [
@@ -156,6 +167,20 @@ def test_build_library_multiple_series(mock_anime_settings):
 
     assert "Frieren" in library
     assert "Dandadan" in library
+
+
+def test_build_library_marks_final_episode(mock_anime_settings):
+    temp_dir = mock_anime_settings
+    (temp_dir / "[Erai-raws] Frieren - 27 [1080p].mkv").touch()
+    (temp_dir / "[Erai-raws] Frieren - 28 END [1080p].mkv").touch()
+
+    from local_mcp.lib.anime import build_library
+    library = build_library()
+
+    is_final_by_episode = {
+        e["episode"]: e["is_final"] for e in library["Frieren"]["episodes"]
+    }
+    assert is_final_by_episode == {27.0: False, 28.0: True}
 
 
 def test_build_library_stalled_episodes(mock_anime_settings):

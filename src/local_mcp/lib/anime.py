@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Regex for local filenames (requires .mkv extension)
 ANIME_NAME_REGEX = re.compile(
-    r"\[(?P<group>.*?)\]\s*(?P<title>.*?)[\s-]*(?P<episode>\d*?)\s*(END)?\s*(\[v\d+\])?(\[|\()(?P<quality>.*?)(\]|\)).*?\.mkv"
+    r"\[(?P<group>.*?)\]\s*(?P<title>.*?)[\s-]*(?P<episode>\d*?)\s*(?P<final>END)?\s*(\[v\d+\])?(\[|\()(?P<quality>.*?)(\]|\)).*?\.mkv"
 )
 
 
@@ -47,6 +47,7 @@ class Episode(TypedDict, total=False):
     quality: str
     path: str
     status: Status
+    is_final: bool  # True when the release group tagged this episode as the series finale (e.g. Erai-raws' "END")
 
 
 class HistoryEntry(TypedDict, total=False):
@@ -71,6 +72,7 @@ class SeriesEpisode(TypedDict):
     episode: float
     path: str
     status: Status
+    is_final: bool  # True when this episode is tagged as the series finale
 
 
 class Series(TypedDict):
@@ -111,6 +113,7 @@ def parse_episode(filename: str, path: str = "") -> Episode | None:
         episode=float(groups["episode"]) if groups["episode"] else -1,
         quality=groups["quality"],
         path=path,
+        is_final=bool(groups["final"]),
     )
 
 
@@ -292,6 +295,7 @@ def build_library() -> dict[str, Series]:
                 "episode": ep["episode"],
                 "path": ep["path"],
                 "status": ep["status"],
+                "is_final": ep["is_final"],
             }
         )
 
