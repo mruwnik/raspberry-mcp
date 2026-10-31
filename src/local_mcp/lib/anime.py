@@ -558,8 +558,11 @@ def get_library(
             s for s in result if any(e["status"] == status for e in s["episodes"])
         ]
 
-    result = _attach_last_activity(result, series_timestamps)
-    return {"series": _attach_ratings(sorted(result, key=lambda s: s["title"]))}
+    result = _attach_ratings(_attach_last_activity(result, series_timestamps))
+    # "unwatched" is the to-watch queue; a dropped series has left it even if episodes remain
+    if status == "unwatched":
+        result = [s for s in result if (s["rating"] or {}).get("status") != "dropped"]
+    return {"series": sorted(result, key=lambda s: s["title"])}
 
 
 def path_outside_anime_dirs(episode_path: Path) -> bool:

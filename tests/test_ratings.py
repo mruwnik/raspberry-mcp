@@ -128,3 +128,21 @@ def test_library_enriched_with_ratings(ratings_env, monkeypatch):
     lib = anime.get_library()
     series = {s["title"]: s for s in lib["series"]}
     assert series["Grand Blue S3"]["rating"]["rating"] == 5.0
+
+
+@pytest.mark.parametrize("status, listed", [
+    ("dropped", False),
+    ("watching", True),
+    ("finished", True),
+])
+def test_unwatched_library_hides_dropped_series(ratings_env, monkeypatch, status, listed):
+    from local_mcp.lib import anime, ratings
+    monkeypatch.setattr(anime, "BASE_PATH", ratings_env)
+    monkeypatch.setattr(anime, "STALLED_DIR", ratings_env / "stalled")
+    monkeypatch.setattr(anime, "HISTORY_FILE", ratings_env / ".anime_history")
+    monkeypatch.setattr(anime, "HISTORY_LOCK_FILE", ratings_env / ".anime_history.lock")
+    monkeypatch.setattr(anime, "WATCH_DIR", ratings_env / ".watch/start")
+    (ratings_env / "[SubsPlease] Grand Blue S3 - 01 (1080p) [ABC].mkv").touch()
+    ratings.write_rating("Grand Blue S3", None, status)
+    titles = [s["title"] for s in anime.get_library(status="unwatched")["series"]]
+    assert ("Grand Blue S3" in titles) == listed
