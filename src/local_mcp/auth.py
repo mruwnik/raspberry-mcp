@@ -18,7 +18,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from passlib.apache import HtpasswdFile
 from pydantic import AnyUrl
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from local_mcp.settings import HTPASSWD_PATH, SERVER_BASE_URL
@@ -113,7 +113,19 @@ class HtpasswdAuth(OAuthProvider):
         routes.append(
             Route("/login", endpoint=self._handle_login, methods=["GET", "POST"])
         )
+        routes.append(Route("/files-auth", endpoint=self.handle_files_auth))
         return routes
+
+    async def handle_files_auth(self, request: Request) -> Response:
+        """nginx auth_request target for the files host, hit on every range request.
+
+        Reads the token db directly: load_access_token's cleanup rewrites the db file.
+        """
+        scheme, _, token = request.headers.get("authorization", "").partition(" ")
+        stored = self._db.get_token(token) if scheme == "Bearer" else None
+        if stored and stored.expires_at > time.time():
+            return Response(status_code=204)
+        return Response(status_code=401)
 
     async def _handle_login(self, request: Request):
         pending_id = request.query_params.get("pending", "")
