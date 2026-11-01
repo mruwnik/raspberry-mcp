@@ -6,7 +6,6 @@
 -- ~/.config/anime-watch/config.json
 --   { "mcp_url": "https://ahiru.pl/mcp",
 --     "files_url": "https://media.ahiru.pl/files/Unsorted/",
---     "http_user": "dan", "http_pass": "...",          -- for files outside LAN
 --     "auth_helper": "/Users/dan/code/local-mcp/client/anime_auth.py" }
 -- Tokens: ~/.config/anime-watch/auth.json (written by anime_auth.py / watch.py).
 -- That file is shared with watch.py's StoredAuth and must keep EXACTLY the keys
@@ -38,6 +37,7 @@ local state = {
   rating_base = nil,    -- pending whole-number rating awaiting optional ".5"
   rating_series = nil,
   rating_status = "finished",
+  rating_on_close = nil, -- callback run once the rating dialog is dismissed
   last_end_reason = nil,
   current_series_is_final = false,  -- does the queued series' last episode carry the finale marker?
 }
@@ -66,30 +66,13 @@ local function urlencode(s)
   end))
 end
 
-local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-local function base64_encode(data)
-  local out = {}
-  for i = 1, #data, 3 do
-    local a, b, c = data:byte(i, i + 2)
-    local n = a * 65536 + (b or 0) * 256 + (c or 0)
-    local i1 = math.floor(n / 262144) % 64
-    local i2 = math.floor(n / 4096) % 64
-    local i3 = math.floor(n / 64) % 64
-    local i4 = n % 64
-    table.insert(out, B64_CHARS:sub(i1 + 1, i1 + 1) .. B64_CHARS:sub(i2 + 1, i2 + 1)
-      .. (b and B64_CHARS:sub(i3 + 1, i3 + 1) or "=")
-      .. (c and B64_CHARS:sub(i4 + 1, i4 + 1) or "="))
-  end
-  return table.concat(out)
-end
-
 -- ---------- curl / MCP ----------
 
-local function curl(args)
+-- secrets go in `stdin` as a curl config (read via -K -) so they never appear in ps
+local function curl(args, stdin)
   local res = mp.command_native({
     name = "subprocess", capture_stdout = true, capture_stderr = true,
-    playback_only = false, args = args,
+    playback_only = false, args = args, stdin_data = stdin,
   })
   if res.status ~= 0 then return nil, res.stderr end
   return res.stdout
@@ -108,12 +91,11 @@ local function refresh_tokens()
   if not auth.refresh_token then return false end
   local base = auth.server_url or "https://ahiru.pl"
   local body, err = curl({
-    "curl", "-s", "-m", "15", "-X", "POST", base .. "/token",
+    "curl", "-s", "-m", "15", "-X", "POST", base .. "/token", "-K", "-",
     "-u", CLIENT_ID .. ":",
     "--data-urlencode", "grant_type=refresh_token",
-    "--data-urlencode", "refresh_token=" .. auth.refresh_token,
     "--data-urlencode", "client_id=" .. CLIENT_ID,
-  })
+  }, string.format('data-urlencode = "refresh_token=%s"\n', auth.refresh_token))
   if not body then return false end
   local tokens = utils.parse_json(body)
   if not (tokens and tokens.access_token) then return false end
@@ -141,12 +123,11 @@ local function mcp_call(tool, args_tbl, _retried)
     params = { name = tool, arguments = args_tbl or {} },
   })
   local body, err = curl({
-    "curl", "-s", "-m", "20", "-X", "POST", config.mcp_url,
-    "-H", "Authorization: Bearer " .. (auth.access_token or ""),
+    "curl", "-s", "-m", "20", "-X", "POST", config.mcp_url, "-K", "-",
     "-H", "Content-Type: application/json",
     "-H", "Accept: application/json, text/event-stream",
     "-d", payload,
-  })
+  }, string.format('header = "Authorization: Bearer %s"\n', auth.access_token or ""))
   if not body then return nil, err end
   local resp = parse_sse(body)
   if resp and resp.error and not _retried then
@@ -289,8 +270,13 @@ local function play_selected()
   local first = true
   for _, path in ipairs(state.queue) do
     local filename = path:match("([^/]+)$")
-    local url = config.files_url .. urlencode(filename)
-    mp.commandv("loadfile", url, first and "replace" or "append-play")
+    mp.command_native({
+      name = "loadfile",
+      url = config.files_url .. urlencode(filename),
+      flags = first and "replace" or "append-play",
+      -- files host needs the MCP token off-LAN; per-file so other URLs played in mpv never get it
+      options = { ["http-header-fields"] = "Authorization: Bearer " .. (auth.access_token or "") },
+    })
     first = false
   end
 end
@@ -304,6 +290,9 @@ local function close_rating()
   for _, key in ipairs({ "1", "2", "3", "4", "5", ".", "d", "ENTER", "ESC" }) do
     mp.remove_key_binding("anirate_" .. key)
   end
+  local on_close = state.rating_on_close
+  state.rating_on_close = nil
+  if on_close then on_close() end
 end
 
 local function submit_rating(rating)
@@ -322,11 +311,12 @@ local function render_rating()
   rating_overlay:update()
 end
 
-local function open_rating(series, status)
+local function open_rating(series, status, on_close)
   state.rating_open = true
   state.rating_series = series
   state.rating_status = status or "finished"
   state.rating_base = nil
+  state.rating_on_close = on_close
   for n = 1, 5 do
     local key = tostring(n)
     mp.add_forced_key_binding(key, "anirate_" .. key, function()
@@ -351,7 +341,19 @@ local function open_rating(series, status)
   render_rating()
 end
 
-local function open_menu()
+-- forward declaration so reopen_menu_if_idle (below) can reference open_menu
+local open_menu
+
+local function reopen_menu_if_idle()
+  -- After a finished series or a dismissed rating dialog, mpv sits idle with a
+  -- blank window. Bring the series menu back rather than leaving it blank.
+  -- Guarded on idle so rating from the menu *during playback* returns to the
+  -- video, not the menu.
+  if not mp.get_property_bool("idle-active") then return end
+  if not state.menu_open and not state.rating_open then open_menu() end
+end
+
+function open_menu()
   if state.menu_open then return end
   if not config.mcp_url then
     return osd("anime.lua: no config at " .. CONFIG_FILE, 8)
@@ -369,11 +371,11 @@ local function open_menu()
       mp.add_forced_key_binding("ENTER", "animenu_ENTER", play_selected)
       mp.add_forced_key_binding("d", "animenu_d", function()
         local s = state.series[state.selected]
-        if s then close_menu(); open_rating(s.title, "dropped") end
+        if s then close_menu(); open_rating(s.title, "dropped", reopen_menu_if_idle) end
       end)
       mp.add_forced_key_binding("r", "animenu_r", function()
         local s = state.series[state.selected]
-        if s then close_menu(); open_rating(s.title, "finished") end
+        if s then close_menu(); open_rating(s.title, "finished", reopen_menu_if_idle) end
       end)
       mp.add_forced_key_binding("q", "animenu_q", close_menu)
       mp.add_forced_key_binding("ESC", "animenu_ESC", close_menu)
@@ -434,10 +436,12 @@ mp.observe_property("idle-active", "bool", function(_, idle)
     local is_final = state.current_series_is_final
     state.current_series = nil
     if is_final then
-      return open_rating(series, "finished")
+      -- Rate the finale, then fall back to the menu once the dialog closes.
+      return open_rating(series, "finished", reopen_menu_if_idle)
     end
     -- Only caught up on episodes released so far — not actually done with
     -- the series, so don't nag for a rating every time a new episode airs.
+    open_menu()
     osd("caught up on " .. series .. " — press r in the menu to rate it", 4)
     return
   end
@@ -449,9 +453,4 @@ if not config.mcp_url then
   mp.msg.warn("anime.lua: no config at " .. CONFIG_FILE .. " — menu disabled")
 else
   config.files_url = config.files_url or "https://media.ahiru.pl/files/Unsorted/"
-  if config.http_user and config.http_pass then
-    -- basic auth for the files host when outside the LAN
-    mp.set_property("http-header-fields",
-      "Authorization: Basic " .. base64_encode(config.http_user .. ":" .. config.http_pass))
-  end
 end

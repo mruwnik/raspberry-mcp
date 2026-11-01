@@ -37,8 +37,6 @@ left off (episodes are only auto-marked watched at >= 80%).
 {
   "mcp_url": "https://ahiru.pl/mcp",
   "files_url": "https://media.ahiru.pl/files/Unsorted/",
-  "http_user": "dan",
-  "http_pass": "...",
   "auth_helper": "/Users/dan/code/local-mcp/client/anime_auth.py"
 }
 ```
@@ -47,8 +45,6 @@ left off (episodes are only auto-marked watched at >= 80%).
 |---------------|----------|-------------------------------------------------------------------------|
 | `mcp_url`     | yes      | The MCP endpoint (stateless `POST /mcp`).                               |
 | `files_url`   | no       | Base URL episodes are fetched from (default `https://media.ahiru.pl/files/Unsorted/`). |
-| `http_user`   | no       | Basic-auth user for the files host (needed outside the LAN).           |
-| `http_pass`   | no       | Basic-auth password for the files host.                                 |
 | `auth_helper` | yes*     | Absolute path to `client/anime_auth.py`. *Needed for the first login and after tokens expire. |
 
 Without a config file the script logs a warning and the menu stays
