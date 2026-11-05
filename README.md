@@ -19,6 +19,12 @@ A local MCP server with music/MPD control and anime download management tools.
 - Mark episodes as watched or stalled
 - CLI command for cron-based automation
 
+### Learning (spaced repetition)
+
+- Decks of items (words, terms, facts) scheduled SM-2 style
+- Driven by conversational events: `seen`, `asked`, `used`, `misused`
+- Sessions inferred from 30-minute idle gaps
+
 ## Installation
 
 ```bash
@@ -50,6 +56,12 @@ All settings are configured via environment variables (or `.env` file):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANIME_BASE_PATH` | `/media/data/Unsorted` | Base directory for anime files |
+
+### Learn
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LEARN_DB` | `.learn.db` | SQLite file for decks and review history |
 
 ### Cache
 

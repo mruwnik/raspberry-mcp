@@ -12,7 +12,7 @@ from starlette.requests import Request
 from local_mcp.auth import HtpasswdAuth
 from local_mcp.settings import SERVER_PORT, TOKEN_DB_PATH
 from local_mcp.token_db import TokenDB
-from local_mcp.tools import anime_mcp, music_mcp
+from local_mcp.tools import anime_mcp, learn_mcp, music_mcp
 
 
 class InjectClientIdMiddleware(BaseHTTPMiddleware):
@@ -32,12 +32,13 @@ class InjectClientIdMiddleware(BaseHTTPMiddleware):
 # Create the MCP server with auth always enabled
 mcp = FastMCP(
     name="local-mcp",
-    instructions="Local MCP server with music/MPD control and anime download tools.",
+    instructions="Local MCP server with music/MPD control, anime download, and spaced-repetition learning tools.",
     auth=HtpasswdAuth(db=TokenDB(TOKEN_DB_PATH)),
 )
 
 # Mount tool subservers
 mcp.mount(anime_mcp)
+mcp.mount(learn_mcp)
 mcp.mount(music_mcp)
 
 # Custom middleware for OAuth flow
