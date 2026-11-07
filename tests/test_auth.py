@@ -280,3 +280,109 @@ async def test_files_auth(auth_instance, headers, expected):
 
     assert response.status_code == expected
     assert response.body == b""
+
+
+def test_verify_credentials_accepts_bcrypt_2y(auth_instance, temp_dir):
+    import bcrypt
+
+    hashed = bcrypt.hashpw(b"testpass", bcrypt.gensalt(7, prefix=b"2b"))
+    hashed = b"$2y$" + hashed[4:]
+    (temp_dir / ".htpasswd").write_bytes(b"testuser:" + hashed + b"\n")
+
+    assert auth_instance._verify_credentials("testuser", "testpass") is True
+    assert not auth_instance._verify_credentials("testuser", "wrongpass")
+
+
+@pytest.mark.parametrize(
+    "peer, headers, expected",
+    [
+        ("127.0.0.1", {"x-real-ip": "1.2.3.4"}, "1.2.3.4"),
+        ("127.0.0.1", {"x-forwarded-for": "1.2.3.4, 10.0.0.1"}, "1.2.3.4"),
+        ("127.0.0.1", {"x-real-ip": "1.2.3.4", "x-forwarded-for": "5.6.7.8"}, "1.2.3.4"),
+        ("127.0.0.1", {}, "127.0.0.1"),
+        ("9.9.9.9", {"x-real-ip": "1.2.3.4"}, "9.9.9.9"),
+        ("9.9.9.9", {"x-forwarded-for": "1.2.3.4"}, "9.9.9.9"),
+    ],
+)
+def test_client_ip_trusts_proxy_headers_only_from_localhost(peer, headers, expected):
+    from starlette.requests import Request
+
+    from local_mcp.auth import client_ip
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+            "client": (peer, 12345),
+        }
+    )
+
+    assert client_ip(request) == expected
+
+
+@pytest.mark.parametrize(
+    "username, expected",
+    [
+        ("alice", "user=alice "),
+        ("evil\nauth failure: login user=x ip=6.6.6.6", "user=evilauthfailure:loginuser=xip=6.6.6.6 "),
+        ("x ip=6.6.6.6", "user=xip=6.6.6.6 "),
+        ("a b\tc", "user=abc "),
+        ("x" * 100, f"user={'x' * 64} "),
+    ],
+)
+@pytest.mark.asyncio
+async def test_failed_login_logs_one_sanitised_line(auth_instance, caplog, username, expected):
+    from urllib.parse import urlencode
+
+    from starlette.requests import Request
+
+    body = urlencode({"username": username, "password": "hunter2"}).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"content-type", b"application/x-www-form-urlencoded"),
+                (b"x-real-ip", b"93.152.221.151"),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "query_string": b"",
+        },
+        receive,
+    )
+
+    await auth_instance._handle_login(request)
+
+    [record] = caplog.records
+    assert record.levelname == "WARNING"
+    assert record.getMessage() == f"auth failure: login {expected}ip=93.152.221.151"
+    assert "hunter2" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "headers, logged",
+    [
+        ([(b"authorization", b"Bearer unknown-token")], ["auth failure: files user=- ip=1.2.3.4"]),
+        ([], []),
+    ],
+)
+@pytest.mark.asyncio
+async def test_files_auth_logs_only_invalid_presented_tokens(auth_instance, caplog, headers, logged):
+    from starlette.requests import Request
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "headers": [*headers, (b"x-real-ip", b"1.2.3.4")],
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+
+    await auth_instance.handle_files_auth(request)
+
+    assert [r.getMessage() for r in caplog.records] == logged

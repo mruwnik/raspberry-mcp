@@ -1,6 +1,7 @@
 """htpasswd-based OAuth authentication for local-mcp."""
 
 import html
+import logging
 import secrets
 import time
 from pathlib import Path
@@ -30,6 +31,8 @@ from local_mcp.token_db import (
     TokenDB,
 )
 
+logger = logging.getLogger(__name__)
+
 # Only these clients may stream from the files host; other clients' tokens
 # (e.g. the Claude.ai connector, held off-box) must not grant media access.
 FILES_CLIENTS = {"anime-watch-cli"}
@@ -38,6 +41,22 @@ FILES_SCOPE = "files"
 LOGIN_TEMPLATE = Template(
     (Path(__file__).parent / "templates" / "login.html").read_text()
 )
+
+
+def client_ip(request: Request) -> str:
+    peer = request.client.host if request.client else "-"
+    # Proxy headers are only honest when nginx on this host set them.
+    if peer != "127.0.0.1":
+        return peer
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    return request.headers.get("x-real-ip") or forwarded or peer
+
+
+def log_auth_failure(kind: str, request: Request, user: str = "-") -> None:
+    # Stable format parsed by CrowdSec on ahiru. Whitespace and control chars are
+    # stripped so an attacker-chosen username can't forge fields or lines.
+    user = "".join(c for c in user if c.isprintable() and not c.isspace())[:64]
+    logger.warning(f"auth failure: {kind} user={user or '-'} ip={client_ip(request)}")
 
 
 class HtpasswdAuth(OAuthProvider):
@@ -132,6 +151,8 @@ class HtpasswdAuth(OAuthProvider):
         stored = self._db.get_token(token) if scheme == "Bearer" else None
         if stored and stored.expires_at > time.time() and FILES_SCOPE in stored.scopes:
             return Response(status_code=204)
+        if token:
+            log_auth_failure("files", request)
         return Response(status_code=401)
 
     async def _handle_login(self, request: Request):
@@ -146,6 +167,7 @@ class HtpasswdAuth(OAuthProvider):
         pending_id = str(form.get("pending", pending_id))
 
         if not self._verify_credentials(username, password):
+            log_auth_failure("login", request, username)
             return self._login_page(pending_id, "Invalid username or password")
 
         pending = self._db.pop_pending_auth(pending_id) if pending_id else None
