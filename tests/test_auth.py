@@ -231,11 +231,25 @@ async def test_load_refresh_token_returns_none_for_missing(auth_instance):
     assert result is None
 
 
+@pytest.mark.parametrize(
+    "client_id, expected",
+    [("anime-watch-cli", ["files"]), ("claude-ai-client", [])],
+)
+def test_create_tokens_grants_files_scope_only_to_files_clients(
+    auth_instance, client_id, expected
+):
+    access, refresh = auth_instance._create_tokens("test", client_id, [])
+
+    assert auth_instance._db.get_token(access).scopes == expected
+    assert auth_instance._db.get_refresh_token(refresh).scopes == expected
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "headers, expected",
     [
         ([(b"authorization", b"Bearer valid-token")], 204),
+        ([(b"authorization", b"Bearer mcp-only-token")], 401),
         ([(b"authorization", b"Bearer expired-token")], 401),
         ([(b"authorization", b"Bearer unknown-token")], 401),
         ([(b"authorization", b"Basic valid-token")], 401),
@@ -245,13 +259,17 @@ async def test_load_refresh_token_returns_none_for_missing(auth_instance):
 async def test_files_auth(auth_instance, headers, expected):
     from starlette.requests import Request
 
-    for token, ttl in [("valid-token", 3600), ("expired-token", -1)]:
+    for token, scopes, ttl in [
+        ("valid-token", ["files"], 3600),
+        ("mcp-only-token", [], 3600),
+        ("expired-token", ["files"], -1),
+    ]:
         auth_instance._db.set_token(
             token,
             StoredToken(
                 token=token,
                 user="test",
-                scopes=[],
+                scopes=scopes,
                 expires_at=time.time() + ttl,
                 client_id="test",
             ),

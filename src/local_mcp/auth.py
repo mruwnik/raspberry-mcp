@@ -30,6 +30,11 @@ from local_mcp.token_db import (
     TokenDB,
 )
 
+# Only these clients may stream from the files host; other clients' tokens
+# (e.g. the Claude.ai connector, held off-box) must not grant media access.
+FILES_CLIENTS = {"anime-watch-cli"}
+FILES_SCOPE = "files"
+
 LOGIN_TEMPLATE = Template(
     (Path(__file__).parent / "templates" / "login.html").read_text()
 )
@@ -70,6 +75,8 @@ class HtpasswdAuth(OAuthProvider):
     ) -> tuple[str, str]:
         """Create and store access + refresh tokens. Returns (access_token, refresh_token)."""
         now = time.time()
+        if client_id in FILES_CLIENTS and FILES_SCOPE not in scopes:
+            scopes = [*scopes, FILES_SCOPE]
         access_token = self._generate_token("at_")
         refresh_token = self._generate_token("rt_")
 
@@ -123,7 +130,7 @@ class HtpasswdAuth(OAuthProvider):
         """
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
         stored = self._db.get_token(token) if scheme == "Bearer" else None
-        if stored and stored.expires_at > time.time():
+        if stored and stored.expires_at > time.time() and FILES_SCOPE in stored.scopes:
             return Response(status_code=204)
         return Response(status_code=401)
 
