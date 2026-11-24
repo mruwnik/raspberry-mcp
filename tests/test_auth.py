@@ -133,18 +133,22 @@ def test_cleanup_expired_removes_old_tokens(auth_instance):
     assert auth_instance._db.get_token("valid") is not None
 
 
-@pytest.mark.parametrize(
-    "token_type,lifetime",
-    [
-        ("access", 30 * 24 * 3600),  # ACCESS_TOKEN_LIFETIME
-        ("refresh", 30 * 24 * 3600),  # REFRESH_TOKEN_LIFETIME
-    ],
-)
-def test_token_lifetimes_are_reasonable(token_type, lifetime):
-    # Tokens should last at least 1 day
-    assert lifetime >= 86400
-    # But not more than 365 days
-    assert lifetime <= 365 * 86400
+async def test_refresh_token_outlives_access_token(auth_instance, monkeypatch):
+    now = time.time()
+    access, refresh = auth_instance._create_tokens("test", "client", [])
+    monkeypatch.setattr(
+        time, "time", lambda: now + auth_instance.ACCESS_TOKEN_LIFETIME + 1
+    )
+    client = await auth_instance.get_client("client")
+
+    assert await auth_instance.load_access_token(access) is None
+    loaded = await auth_instance.load_refresh_token(client, refresh)
+    assert loaded is not None
+
+    rotated = await auth_instance.exchange_refresh_token(client, loaded, [])
+    assert rotated.refresh_token != refresh
+    assert await auth_instance.load_access_token(rotated.access_token) is not None
+    assert await auth_instance.load_refresh_token(client, refresh) is None
 
 
 # Async tests

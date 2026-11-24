@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 FILES_CLIENTS = {"anime-watch-cli"}
 FILES_SCOPE = "files"
 
+DAY = 24 * 3600
+
 LOGIN_TEMPLATE = Template(
     (Path(__file__).parent / "templates" / "login.html").read_text()
 )
@@ -66,8 +68,11 @@ class HtpasswdAuth(OAuthProvider):
     Create with: htpasswd -c .htpasswd username
     """
 
-    ACCESS_TOKEN_LIFETIME = 30 * 24 * 3600  # 30 days
-    REFRESH_TOKEN_LIFETIME = 30 * 24 * 3600  # 30 days
+    ACCESS_TOKEN_LIFETIME = DAY
+    # Must outlive the access token, or an expired client can never refresh.
+    # A year so rarely used clients survive long idle spells; each refresh
+    # rotates the token, so a leaked one is only good until the next refresh.
+    REFRESH_TOKEN_LIFETIME = 365 * DAY
     AUTH_CODE_LIFETIME = 600  # 10 minutes
     PENDING_AUTH_LIFETIME = 600  # 10 minutes
 
